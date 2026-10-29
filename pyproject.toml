@@ -3,6 +3,8 @@ name = "nipstack-core"
 version = "0.1.0"
 description = "Python library for network data collection, parsing, and structured observations"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 
