@@ -2,24 +2,20 @@
 
 This file supplements the root and Python package `AGENTS.md` instructions.
 
-## Scope
+## Scope and design
 
-NipStack Native is the only V1 CLI/text parsing engine. JMESPath owns JSON/API transformations. Do not introduce TTP or another CLI parsing dependency, adapter or fallback.
+- NipStack Native is the **only** V1 CLI/text parser. JMESPath owns JSON/API transformations. No TTP engine, templates, dependency, adapter, compatibility layer, or fallback.
+- Inputs are validated/prepared resources and RawArtifacts; output is exactly the FeatureData validated independently against its Observation Schema. Keep transformations pure and deterministic: no network access, arbitrary file access, global mutable state, secret lookup, clock-dependent output, or RawArtifact mutation.
+- Templates are declarative and data-only. Reject arbitrary Python, scripts, imports, callbacks, `eval`, and `exec`.
+- Introduce only primitives justified by distinct real requirements. Possible areas include nested/repeating blocks, optional lines, alternatives, typed captures, presence flags, list/split, controlled conversions, block boundaries, and explicit grouping/joining. These are **candidates**, not a pre-approved DSL feature list.
+- Propose and test syntax, validation, error behavior, and resource limits before freezing any DSL rule. Do not hardcode vendor-specific grammar in the generic engine.
+- Do not silently normalize dictionaries/lists, prune empty values, discard wrappers, or invent observations. Distinguish absent, valid empty, and failed results.
+- Validate/compile templates during offline Profile preparation when feasible; fail explicitly on unsupported, unsafe, or ambiguous constructs.
 
-## Design
+## Evidence-driven implementation order
 
-- Preserve the common parser contract: inputs are RawArtifacts and output is exactly the FeatureData validated by a separate Observation Schema validator.
-- Keep parser behavior pure and deterministic: no network, filesystem side effects, global mutable state, secret lookup, clock-dependent output, or mutation of RawArtifacts.
-- Templates are declarative and data-only. Never permit arbitrary Python, scripts, imports, callbacks, `eval`, or `exec`.
-- Add only primitives supported by demonstrated network requirements. Candidate primitives include hierarchical blocks, nested/repeating sections, optional lines, syntax alternatives, typed captures, presence booleans, lists/split, controlled conversions, block boundaries, merge/group-by-key and join-by-key.
-- The native template DSL syntax is not fixed in advance. Propose and test each new syntax and its validation rules against real representative fixtures before standardizing it.
-- Do not hardcode vendor-specific grammars in the generic parser engine; keep those in Profile resources.
-- Do not silently normalize dicts to lists, prune empty values, remove wrappers or invent observations; distinguish absent, empty and failed states.
-- Validate/compile native templates at Profile load when feasible; reject unsupported, unsafe and ambiguous constructs explicitly.
-
-## Evidence and quality
-
-- Begin with representative NX-OS interface/routing examples, then extend to FortiGate IPsec, PAN-OS or F5 when justified.
-- Add golden fixtures and malformed/edge-case tests for each primitive, including deterministic result and error contracts.
-- Evaluate correctness, coverage, readability and maintainability of templates as well as CPU and peak memory before broad Profile expansion.
-- Treat superior capability or performance compared with alternatives as a testable objective, never as an assumed result.
+- **P0 — NX-OS `show version`:** first compact CLI proof and intended initial official SSH Feature (`check.global.show_version`), subject to the selected increment's approved Profile/Schema contract.
+- **P1 — interfaces** and **P2 — static routes:** representative distinct-complexity parsing scenarios used to prove and qualify Native; **not automatically official V1 Features**. Broader vendor cases (Fortinet, PAN-OS, F5, etc.) require their own approved scope.
+- Prefer **small, meaningfully different CLI excerpts**, not complete running configurations or hundreds of repetitive interfaces. Verify provenance, rights, coherent sanitization, and publication approval before any real-source fixture enters the public repository. Historical `ndcore` templates are reference material, **not** executable compatibility assets and not required context for public contributors.
+- Add golden expected outputs and malformed/edge-case tests for each implemented primitive. Measure correctness, coverage, template readability, CPU, and peak memory under a reproducible offline methodology; never assert performance superiority without evidence.
+- Preserve explicit boundaries between **parser capability demonstrated**, **official bundled Feature**, and **authorized real-device lab proof**. A parser test passing is not proof of vendor-wide support or G3-SSH.
