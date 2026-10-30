@@ -80,6 +80,7 @@ jobs:
       - name: Verify distribution files
         run: |
           python3 - <<'PY'
+          import tarfile
           from pathlib import Path
           from zipfile import ZipFile
 
@@ -90,7 +91,21 @@ jobs:
           with ZipFile(wheels[0]) as archive:
               members = archive.namelist()
               assert "nipstack_core/py.typed" in members
+              assert "nipstack_core/contracts/feature_selection.py" in members
+              assert "nipstack_core/contracts/errors.py" in members
               assert not any(item.endswith("/AGENTS.md") for item in members)
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              source_members = archive.getnames()
+              assert any(
+                  item.endswith("/src/nipstack_core/contracts/feature_selection.py")
+                  for item in source_members
+              )
+              assert any(
+                  item.endswith("/src/nipstack_core/py.typed")
+                  for item in source_members
+              )
+          for names in (members, source_members):
+              assert not any("/fakes/" in item for item in names)
           print("Wheel and sdist verified")
           PY
 
@@ -98,11 +113,50 @@ jobs:
         run: |
           uv venv --python 3.12 .venv-wheel
           uv pip install --python .venv-wheel/bin/python dist/*.whl
-          .venv-wheel/bin/python - <<'PY'
+          .venv-wheel/bin/python -I - <<'PY'
+          from dataclasses import FrozenInstanceError
+          from importlib import resources
           from importlib.metadata import version
           from pathlib import Path
+          from unittest import TestCase
+
           import nipstack_core
+          from nipstack_core import (
+              FeatureSelection,
+              FeatureSelectionKind,
+              NipStackCoreUsageError,
+              contracts,
+          )
 
           assert ".venv-wheel" in str(Path(nipstack_core.__file__).resolve())
+          assert resources.files(nipstack_core).joinpath("py.typed").is_file()
+          expected = {"FeatureSelection", "FeatureSelectionKind", "NipStackCoreUsageError"}
+          assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
+          for name in expected:
+              assert getattr(nipstack_core, name) is getattr(contracts, name)
+          assert issubclass(NipStackCoreUsageError, ValueError)
+          assert FeatureSelection.all().kind is FeatureSelectionKind.ALL
+          assert FeatureSelection.all().values == ()
+          selection = FeatureSelection.modes("config", "check", "config")
+          assert selection.kind is FeatureSelectionKind.MODES
+          assert selection.values == ("config", "check")
+          assert selection == FeatureSelection.modes("config", "check")
+          assert hash(selection) == hash(FeatureSelection.modes("config", "check"))
+          features = FeatureSelection.features("custom.network.ipv6")
+          assert features.kind is FeatureSelectionKind.FEATURES
+          assert features.values == ("custom.network.ipv6",)
+          check = TestCase()
+          with check.assertRaises(TypeError):
+              FeatureSelection()
+          with check.assertRaises(TypeError):
+              FeatureSelection(FeatureSelectionKind.ALL, ())
+          with check.assertRaises(FrozenInstanceError):
+              selection.values = ()
+          for factory in (FeatureSelection.modes, FeatureSelection.features):
+              with check.assertRaises(NipStackCoreUsageError):
+                  factory()
+              with check.assertRaises(NipStackCoreUsageError):
+                  factory(None)
+          assert not hasattr(nipstack_core, "collect")
           print("Installed nipstack-core version:", version("nipstack-core"))
           PY
