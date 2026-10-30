@@ -8,6 +8,8 @@ These instructions apply to all coding agents (GitHub Copilot, Codex, Claude Cod
 
 The public repository is self-contained. The assigned GitHub Issue, accepted public contracts, code, tests, documentation, and ADRs define the task and implemented behavior. Never require access to private `NipStack_Docs`, historical repositories, or chat history. If a requirement is missing or contradictory, flag it and request a decision rather than inventing a contract. A proposal or workstream plan does not by itself authorize a public API or code change.
 
+**Before analyzing or changing code**, read [CONTRIBUTING.md](CONTRIBUTING.md) and [the public coding standards](docs/developer/coding-standards.md). These are the permanent contribution and maintainability rules for both agents and humans; do not duplicate them in scoped `AGENTS.md` files.
+
 ## Issue-driven, agent-agnostic workflow
 
 1. Work on **one bounded increment** at a time (for example, `20A`, `20B`, or `40A`) from a self-contained public GitHub Issue. Preserve the workstream numbering **20–140**; do not reinterpret an entire workstream as one coding task.
