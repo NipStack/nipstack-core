@@ -3,6 +3,32 @@
 Public APIs are introduced incrementally as the approved contracts are implemented.
 """
 
-from .contracts import FeatureSelection, FeatureSelectionKind, NipStackCoreUsageError
+from .contracts import (
+    BearerTokenAuth,
+    ConnectionTarget,
+    FeatureSelection,
+    FeatureSelectionKind,
+    HTTPEndpoint,
+    NipStackCoreUsageError,
+    NoAuth,
+    SecretValue,
+    SSHEndpoint,
+    SSHKeyAuth,
+    TargetDescriptor,
+    UsernamePasswordAuth,
+)
 
-__all__ = ["FeatureSelection", "FeatureSelectionKind", "NipStackCoreUsageError"]
+__all__ = [
+    "BearerTokenAuth",
+    "ConnectionTarget",
+    "FeatureSelection",
+    "FeatureSelectionKind",
+    "HTTPEndpoint",
+    "NipStackCoreUsageError",
+    "NoAuth",
+    "SecretValue",
+    "SSHKeyAuth",
+    "SSHEndpoint",
+    "TargetDescriptor",
+    "UsernamePasswordAuth",
+]

@@ -93,6 +93,8 @@ jobs:
               assert "nipstack_core/py.typed" in members
               assert "nipstack_core/contracts/feature_selection.py" in members
               assert "nipstack_core/contracts/errors.py" in members
+              for module in ("secrets", "authentication", "connection_target"):
+                  assert f"nipstack_core/contracts/{module}.py" in members
               assert not any(item.endswith("/AGENTS.md") for item in members)
           with tarfile.open(sdists[0], "r:gz") as archive:
               source_members = archive.getnames()
@@ -104,6 +106,11 @@ jobs:
                   item.endswith("/src/nipstack_core/py.typed")
                   for item in source_members
               )
+              for module in ("secrets", "authentication", "connection_target"):
+                  assert any(
+                      item.endswith(f"/src/nipstack_core/contracts/{module}.py")
+                      for item in source_members
+                  )
           for names in (members, source_members):
               assert not any("/fakes/" in item for item in names)
           print("Wheel and sdist verified")
@@ -114,6 +121,7 @@ jobs:
           uv venv --python 3.12 .venv-wheel
           uv pip install --python .venv-wheel/bin/python dist/*.whl
           .venv-wheel/bin/python -I - <<'PY'
+          import json
           from dataclasses import FrozenInstanceError
           from importlib import resources
           from importlib.metadata import version
@@ -122,15 +130,29 @@ jobs:
 
           import nipstack_core
           from nipstack_core import (
+              BearerTokenAuth,
+              ConnectionTarget,
               FeatureSelection,
               FeatureSelectionKind,
+              HTTPEndpoint,
               NipStackCoreUsageError,
+              NoAuth,
+              SecretValue,
+              SSHKeyAuth,
+              SSHEndpoint,
+              TargetDescriptor,
+              UsernamePasswordAuth,
               contracts,
           )
 
           assert ".venv-wheel" in str(Path(nipstack_core.__file__).resolve())
           assert resources.files(nipstack_core).joinpath("py.typed").is_file()
-          expected = {"FeatureSelection", "FeatureSelectionKind", "NipStackCoreUsageError"}
+          expected = {
+              "BearerTokenAuth", "ConnectionTarget", "FeatureSelection",
+              "FeatureSelectionKind", "HTTPEndpoint", "NipStackCoreUsageError",
+              "NoAuth", "SecretValue", "SSHKeyAuth", "SSHEndpoint",
+              "TargetDescriptor", "UsernamePasswordAuth",
+          }
           assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
           for name in expected:
               assert getattr(nipstack_core, name) is getattr(contracts, name)
@@ -157,6 +179,46 @@ jobs:
                   factory()
               with check.assertRaises(NipStackCoreUsageError):
                   factory(None)
+
+          secret = SecretValue("SYNTHETIC_SECRET_SENTINEL")
+          assert secret.reveal() == "SYNTHETIC_SECRET_SENTINEL"
+          assert str(secret) == repr(secret) == "SecretValue('**********')"
+          assert secret != SecretValue(secret.reveal())
+          with check.assertRaises(FrozenInstanceError):
+              secret._value = "changed"
+          https = HTTPEndpoint(host="api.example.invalid")
+          ssh = SSHEndpoint(host="2001:db8::1")
+          assert https.verify_tls is True and https.effective_port == 443
+          assert ssh.verify_host_key is True and ssh.port == 22
+          assert HTTPEndpoint(host="api.example.invalid", scheme="http").effective_port == 80
+          password = UsernamePasswordAuth(username="user:name", password=secret)
+          key = SSHKeyAuth(username="user:name", key_file="/synthetic/key", passphrase=secret)
+          bearer = BearerTokenAuth(token=secret)
+          for endpoint, auth in (
+              (https, password), (https, bearer), (https, NoAuth()),
+              (ssh, password), (ssh, key),
+          ):
+              target = ConnectionTarget(endpoint=endpoint, authentication=auth, connect_timeout=5)
+              assert target.connect_timeout == 5.0 and target.operation_timeout is None
+              descriptor = target.to_descriptor()
+              assert isinstance(descriptor, TargetDescriptor)
+              assert set(descriptor.to_dict()) == {"scheme", "host", "port"}
+              for display in (repr(target), str(auth), json.dumps(descriptor.to_dict())):
+                  assert "SYNTHETIC_SECRET_SENTINEL" not in display
+              with check.assertRaises(FrozenInstanceError):
+                  target.endpoint = ssh
+          http = HTTPEndpoint(host="api.example.invalid", scheme="http")
+          ConnectionTarget(endpoint=http, authentication=NoAuth())
+          for auth in (password, key, bearer):
+              with check.assertRaises(NipStackCoreUsageError):
+                  ConnectionTarget(endpoint=http, authentication=auth)
+          with check.assertRaises(NipStackCoreUsageError):
+              HTTPEndpoint(host="https://user@api.example.invalid/path")
+          for value in (True, 0, -1, float("nan"), float("inf"), 10 ** 1000):
+              with check.assertRaises(NipStackCoreUsageError):
+                  ConnectionTarget(endpoint=https, authentication=NoAuth(), connect_timeout=value)
+          with check.assertRaises(TypeError):
+              ConnectionTarget(endpoint=http, authentication=NoAuth(), allow_plaintext_auth=True)
           assert not hasattr(nipstack_core, "collect")
           print("Installed nipstack-core version:", version("nipstack-core"))
           PY
