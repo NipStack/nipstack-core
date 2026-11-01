@@ -93,7 +93,10 @@ jobs:
               assert "nipstack_core/py.typed" in members
               assert "nipstack_core/contracts/feature_selection.py" in members
               assert "nipstack_core/contracts/errors.py" in members
-              for module in ("secrets", "authentication", "connection_target"):
+              for module in (
+                  "secrets", "authentication", "connection_target", "json_data",
+                  "identities", "operational_errors", "artifacts", "results",
+              ):
                   assert f"nipstack_core/contracts/{module}.py" in members
               assert not any(item.endswith("/AGENTS.md") for item in members)
           with tarfile.open(sdists[0], "r:gz") as archive:
@@ -106,7 +109,10 @@ jobs:
                   item.endswith("/src/nipstack_core/py.typed")
                   for item in source_members
               )
-              for module in ("secrets", "authentication", "connection_target"):
+              for module in (
+                  "secrets", "authentication", "connection_target", "json_data",
+                  "identities", "operational_errors", "artifacts", "results",
+              ):
                   assert any(
                       item.endswith(f"/src/nipstack_core/contracts/{module}.py")
                       for item in source_members
@@ -122,7 +128,8 @@ jobs:
           uv pip install --python .venv-wheel/bin/python dist/*.whl
           .venv-wheel/bin/python -I - <<'PY'
           import json
-          from dataclasses import FrozenInstanceError
+          from dataclasses import FrozenInstanceError, replace
+          from datetime import UTC, datetime
           from importlib import resources
           from importlib.metadata import version
           from pathlib import Path
@@ -131,12 +138,28 @@ jobs:
           import nipstack_core
           from nipstack_core import (
               BearerTokenAuth,
+              CollectionResult,
+              CollectionStatus,
               ConnectionTarget,
+              DiagnosticCode,
+              ErrorCode,
+              ErrorStage,
+              ExecutionMetadata,
+              FeatureResult,
               FeatureSelection,
               FeatureSelectionKind,
+              FeatureStatus,
               HTTPEndpoint,
               NipStackCoreUsageError,
+              NipStackCoreDiagnostic,
+              NipStackCoreError,
               NoAuth,
+              ProfileIdentity,
+              RawArtifact,
+              RawArtifactPolicy,
+              RetryHint,
+              SchemaIdentity,
+              ScopeHint,
               SecretValue,
               SSHKeyAuth,
               SSHEndpoint,
@@ -152,6 +175,11 @@ jobs:
               "FeatureSelectionKind", "HTTPEndpoint", "NipStackCoreUsageError",
               "NoAuth", "SecretValue", "SSHKeyAuth", "SSHEndpoint",
               "TargetDescriptor", "UsernamePasswordAuth",
+              "CollectionResult", "CollectionStatus", "DiagnosticCode",
+              "ErrorCode", "ErrorStage", "ExecutionMetadata", "FeatureResult",
+              "FeatureStatus", "JSONDocument", "JSONValue", "NipStackCoreDiagnostic",
+              "NipStackCoreError", "ProfileIdentity", "RawArtifact",
+              "RawArtifactPolicy", "RetryHint", "SchemaIdentity", "ScopeHint",
           }
           assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
           for name in expected:
@@ -219,6 +247,71 @@ jobs:
                   ConnectionTarget(endpoint=https, authentication=NoAuth(), connect_timeout=value)
           with check.assertRaises(TypeError):
               ConnectionTarget(endpoint=http, authentication=NoAuth(), allow_plaintext_auth=True)
+
+          now = datetime(2026, 1, 1, tzinfo=UTC)
+          execution = ExecutionMetadata(
+              collection_id="synthetic-collection", nipstack_core_version="synthetic-version",
+              started_at=now, finished_at=now, duration_ms=0,
+          )
+          schema = SchemaIdentity(digest="sha256:" + "a" * 64)
+          payload = {"items": [{"value": "SYNTHETIC_SECRET_SENTINEL"}]}
+          artifact = RawArtifact(
+              artifact_id="artifact", action_id="action", kind="configuration_snapshot",
+              content_type="application/json", content=payload, acquired_at=now, duration_ms=0,
+          )
+          observed = FeatureResult(
+              feature_id="config.system.hostname", status=FeatureStatus.SUCCESS,
+              scope_hint=ScopeHint.SOURCE, started_at=now, finished_at=now,
+              schema_identity=schema, data=payload, source_artifact_refs=["artifact"],
+          )
+          local_error = NipStackCoreError(
+              code=ErrorCode.PARSE_ERROR, stage=ErrorStage.PARSING,
+              context={"action_id": "SYNTHETIC_SECRET_SENTINEL"},
+          )
+          skipped = replace(
+              observed, feature_id="check.system.status", status=FeatureStatus.SKIPPED,
+              data=None, schema_identity=None, error=local_error,
+          )
+          diagnostic = NipStackCoreDiagnostic(
+              code=DiagnosticCode.CLEANUP_FAILED, stage=ErrorStage.CLEANUP,
+          )
+          result = CollectionResult(
+              status=CollectionStatus.PARTIAL,
+              profile=ProfileIdentity(profile_id="synthetic-profile", version="synthetic-version"),
+              target=target.to_descriptor(), execution=execution,
+              features={observed.feature_id: observed, skipped.feature_id: skipped},
+              artifacts={"artifact": artifact}, diagnostics=[diagnostic],
+          )
+          payload["items"].clear()
+          assert observed.data == artifact.content == {
+              "items": ({"value": "SYNTHETIC_SECRET_SENTINEL"},),
+          }
+          assert observed.source_artifact_refs == ("artifact",)
+          assert result.diagnostics == (diagnostic,)
+          assert local_error.retry_hint is RetryHint.UNKNOWN
+          assert RawArtifactPolicy.PROFILE_DEFAULT.value == "PROFILE_DEFAULT"
+          assert replace(artifact, content=None).content is None
+          assert replace(observed, data={}).data == {}
+          assert replace(observed, data=[]).data == ()
+          for value in (artifact, observed, result, local_error, diagnostic):
+              assert "SYNTHETIC_SECRET_SENTINEL" not in repr(value) + str(value)
+              with check.assertRaises(TypeError):
+                  hash(value)
+          with check.assertRaises(TypeError):
+              observed.data["changed"] = True
+          with check.assertRaises(TypeError):
+              result.features["changed"] = observed
+          with check.assertRaises(FrozenInstanceError):
+              result.status = CollectionStatus.SUCCESS
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(result, status=CollectionStatus.FAILED, features={}, error=None)
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(result, profile=ProfileIdentity(profile_id="unknown-version"))
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(observed, data="not-an-array")
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(local_error, context={"exception": "unsafe"})
           assert not hasattr(nipstack_core, "collect")
+          assert not hasattr(nipstack_core, "CollectionRequest")
           print("Installed nipstack-core version:", version("nipstack-core"))
           PY

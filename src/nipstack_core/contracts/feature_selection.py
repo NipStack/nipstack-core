@@ -92,13 +92,17 @@ def _validate_values(kind: FeatureSelectionKind, values: tuple[str, ...]) -> tup
     for position, value in enumerate(values, start=1):
         if not isinstance(value, str):
             raise NipStackCoreUsageError(f"{kind.value}() argument {position} must be a string.")
-        segments = value.split(".")
-        if len(segments) != segment_count or any(
-            _SEGMENT.fullmatch(segment) is None for segment in segments
-        ):
+        if not _matches_identifier(value, segment_count):
             raise NipStackCoreUsageError(
                 f"{kind.value}() argument {position} must have {segment_count} "
                 "dot-separated segment(s) matching ASCII [a-z][a-z0-9_]*."
             )
 
     return tuple(dict.fromkeys(values))
+
+
+def _matches_identifier(value: str, segment_count: int) -> bool:
+    segments = value.split(".")
+    return len(segments) == segment_count and all(
+        _SEGMENT.fullmatch(segment) is not None for segment in segments
+    )
