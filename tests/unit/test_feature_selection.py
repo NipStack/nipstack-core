@@ -278,7 +278,20 @@ def test_repr_describes_kind_and_values() -> None:
 
 
 def test_public_exports_are_real_and_consistent() -> None:
-    expected = {"FeatureSelection", "FeatureSelectionKind", "NipStackCoreUsageError"}
+    expected = {
+        "BearerTokenAuth",
+        "ConnectionTarget",
+        "FeatureSelection",
+        "FeatureSelectionKind",
+        "HTTPEndpoint",
+        "NipStackCoreUsageError",
+        "NoAuth",
+        "SecretValue",
+        "SSHKeyAuth",
+        "SSHEndpoint",
+        "TargetDescriptor",
+        "UsernamePasswordAuth",
+    }
 
     assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
     for name in expected:
