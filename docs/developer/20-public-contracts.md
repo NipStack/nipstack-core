@@ -2,7 +2,8 @@
 
 Public contracts are exported from both `nipstack_core` and
 `nipstack_core.contracts` and depend only on the standard library. They cover
-explicit Feature selection and offline connection-target data. The accepted
+explicit Feature selection, offline connection-target data, and immutable result
+values. The accepted
 initial selection contract is recorded in
 [Issue #8](https://github.com/NipStack/nipstack-core/issues/8#issuecomment-6512866322).
 
@@ -191,5 +192,223 @@ host-key verification, trusted file contents, effective timeouts, network
 authorization, DNS rebinding protection or redirect safety. Future Connectors must
 enforce trust, controlled origins/relative Action paths, runtime-auth ownership,
 no implicit credentials/proxies, and secure failure when trust is unavailable.
-There is no implemented `collect()`, Profile resolver, AuthStrategy, operational
-insecure-transport diagnostic or network operation in these contracts.
+There is no implemented `collect()`, Profile resolver, AuthStrategy, automatic
+insecure-transport reporting or network operation in these contracts.
+
+## Immutable results and provenance (20C)
+
+The approved decisions are recorded in
+[Issue #12](https://github.com/NipStack/nipstack-core/issues/12#issuecomment-6565483601).
+20C adds 16 public types and two JSON aliases, bringing both public export lists
+to 30 entries. These are construction-time contracts, not an execution engine.
+
+### Constructors and identities
+
+The implemented constructor signatures are keyword-only:
+
+```text
+ProfileIdentity(*, profile_id: str, version: str | None = None)
+SchemaIdentity(*, digest: str, algorithm: Literal["schema-c14n-v1"] = "schema-c14n-v1")
+ExecutionMetadata(*, collection_id: str, nipstack_core_version: str,
+                  started_at: datetime, finished_at: datetime, duration_ms: float,
+                  correlation_id: str | None = None)
+RawArtifact(*, artifact_id: str, action_id: str, kind: str, content_type: str,
+            content: JSONValue, acquired_at: datetime, duration_ms: float)
+NipStackCoreError(*, code: ErrorCode, stage: ErrorStage,
+                 retry_hint: RetryHint = RetryHint.UNKNOWN,
+                 context: Mapping[str, str | int] | None = None)
+NipStackCoreDiagnostic(*, code: DiagnosticCode, stage: ErrorStage,
+                      context: Mapping[str, str | int] | None = None)
+FeatureResult(*, feature_id: str, status: FeatureStatus, scope_hint: ScopeHint,
+              started_at: datetime, finished_at: datetime,
+              schema_identity: SchemaIdentity | None = None,
+              data: JSONDocument | None = None, error: NipStackCoreError | None = None,
+              source_artifact_refs: Sequence[str] = ())
+CollectionResult(*, status: CollectionStatus, profile: ProfileIdentity,
+                 target: TargetDescriptor, execution: ExecutionMetadata,
+                 features: Mapping[str, FeatureResult], artifacts: Mapping[str, RawArtifact],
+                 error: NipStackCoreError | None = None,
+                 diagnostics: Sequence[NipStackCoreDiagnostic] = ())
+```
+
+IDs, versions and correlation IDs are opaque nonempty strings, without
+peripheral whitespace, control characters or Unicode surrogates. No UUID,
+SemVer, registry membership or Profile resource convention is inferred.
+`ProfileIdentity.version=None` preserves a requested ID before successful loading.
+**Every nonempty Collection features mapping requires a known Profile version**,
+including failed, skipped or cancelled results.
+
+`SchemaIdentity` contains only the digest and algorithm. The digest must exactly
+match `sha256:[0-9a-f]{64}`. The sole algorithm is `schema-c14n-v1`; its intended
+input is JCS-canonicalized Schema content. Equal content can share an identity
+across different Profiles and Features. Construction validates syntax, not the
+digest's truth: computing/verifying the canonical digest belongs to 50D.
+
+All timestamps must be timezone-aware UTC (zero-offset equivalents normalize to
+UTC). Finish cannot precede start. `duration_ms` accepts finite nonnegative
+integers/floats representable as a float, converts to float and rejects bool,
+NaN, infinities and oversized integers. A supplied monotonic duration is not
+recomputed or compared with wall-clock elapsed time. IDs, clocks and the
+`nipstack_core_version` value must be supplied, not generated or read at runtime.
+
+### JSON snapshots and observation shape
+
+The aliases deliberately use explicit array types, not `Sequence`, so `str` is
+not statically accepted as a JSON document root:
+
+```python
+from collections.abc import Mapping
+from typing import TypeAlias
+
+JSONValue: TypeAlias = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | Mapping[str, "JSONValue"]
+    | list["JSONValue"]
+    | tuple["JSONValue", ...]
+)
+JSONDocument: TypeAlias = Mapping[str, JSONValue] | list[JSONValue] | tuple[JSONValue, ...]
+```
+
+Every supplied JSON container is recursively copied. Objects become read-only
+mapping proxies backed by owned dictionaries; arrays become tuples. Strings and
+keys must have valid Unicode scalar values; keys must be strings. Floating-point
+numbers must be finite. Bytes, sets, dates, exceptions, secrets, auth objects and
+other arbitrary Python objects are rejected without converting them to text.
+Error messages do not echo keys, paths or values.
+
+Cycles are rejected; shared acyclic subtrees are accepted and copied separately.
+The exact limit is **64 containers along a path, including the root**; scalars
+do not add depth. A 65th container fails explicitly, without truncation. This is
+not a byte, width, CPU or memory budget and does not replace future RuntimeLimits.
+Equality is ordinary Python structural equality, not JCS canonical equality.
+There is no observation JSON Schema validation or universal vendor schema here.
+
+### Artifacts and Feature results
+
+`RawArtifact.kind` is an open semantic token matching ASCII `[a-z][a-z0-9_]*`,
+such as `configuration_snapshot`, independent of text versus JSON.
+`content_type` is nonempty single-line metadata without peripheral whitespace or
+control/surrogate characters. It is descriptive, not parsed, sniffed or used to
+decode/coerce content. Artifact and Action IDs are distinct roles, not derived
+from command strings; equal strings are allowed.
+
+An artifact represents **successful acquisition only**. `content` is required:
+`None` means intentionally hidden, whereas `""`, `{}` and `[]` are legitimate
+empty output. JSON scalar content is allowed. A visible JSON null cannot be
+distinguished from hidden content in this contract. Failed acquisition creates
+no artifact and must not be referenced.
+
+`RawArtifactPolicy` has `NONE` and `PROFILE_DEFAULT`. It declares vocabulary only:
+the future request field belongs to 20D, and actual exposure requires both the
+Profile opt-in and caller `PROFILE_DEFAULT` in workstream 80. Instantiating this
+enum does not filter or authorize disclosure of an artifact.
+
+`FeatureStatus` has `SUCCESS`, `FAILED`, `SKIPPED`; `ScopeHint` has `SOURCE` and
+`MANAGED_SYSTEM`. Scope is required. Feature IDs use the unchanged 20A grammar.
+
+| Feature status | Data | Schema identity | Local error |
+| --- | --- | --- | --- |
+| `SUCCESS` | Object/array, including empty | Required | Forbidden |
+| `FAILED` / `SKIPPED` | `None` | Optional (early failure) | Required |
+
+Feature times describe processing, separately from artifact acquisition times.
+Equal timestamps are valid, including for skipped Features. References normalize
+to an ordered tuple; duplicates fail. A failed parse can retain references to
+successfully acquired artifacts. Collection map keys must equal their contained
+Feature/artifact IDs; every reference must resolve, including masked artifacts
+whose metadata remains present. Unreferenced acquired artifacts are allowed.
+This does not prove Action existence, at-most-once execution, Profile membership,
+or detect duplicate dictionary keys overwritten before construction.
+
+### Collection outcome
+
+Status is explicit and checked, never inferred:
+
+| Collection status | Required coherence |
+| --- | --- |
+| `SUCCESS` | Nonempty, all Features successful, no global error |
+| `PARTIAL` | At least one success and one failed/skipped Feature, no global error |
+| `FAILED` | A non-cancellation global error, **or** nonempty Features containing only local failures/skips and no global error |
+| `CANCELLED` | Global `ErrorCode.CANCELLED`; any already-produced results may remain |
+
+`FAILED(features={}, error=None)` is invalid. A global non-cancellation failure
+can coexist with any mix of completed results, including all-success Features.
+Global cancellation cannot use `FAILED`. Empty early failed/cancelled Collections
+can have a known or unknown Profile version but require their global error.
+Diagnostics never downgrade status and can accompany success.
+
+Feature/artifact mappings are copied, frozen and retain insertion order; mapping
+equality ignores order. Diagnostics normalize to an ordered tuple without
+deduplication. The target must be an existing credential-free `TargetDescriptor`,
+never a `ConnectionTarget`.
+
+### Structured errors and bounded diagnostics
+
+`NipStackCoreError` and `NipStackCoreDiagnostic` are result values, not raised
+exceptions. Both expose a read-only fixed English `message` derived solely from
+their code; no free-form message input or context interpolation is accepted.
+Invalid construction still raises `NipStackCoreUsageError`, with native
+`TypeError` for calls outside signatures.
+
+`ErrorCode` contains exactly:
+
+```text
+PROFILE_NOT_FOUND PROFILE_INVALID SELECTION_INVALID TARGET_INVALID
+FINGERPRINT_MISMATCH AUTHENTICATION_ERROR CONNECTION_TIMEOUT CONNECTION_ERROR
+SESSION_SETUP_ERROR OPERATION_TIMEOUT RESOURCE_LIMIT_EXCEEDED COMMAND_ERROR
+API_ERROR PARSE_ERROR SCHEMA_VALIDATION_ERROR DEPENDENCY_FAILED FEATURE_UNSUPPORTED
+EXECUTION_CONTROL_ERROR CANCELLED CLEANUP_ERROR INTERNAL_ERROR
+```
+
+`ErrorStage` contains `PROFILE`, `PLANNING`, `CONNECTION`, `SESSION_SETUP`,
+`FINGERPRINT`, `ACTION`, `PARSING`, `VALIDATION`, `CANCELLATION`, `CLEANUP`,
+`INTERNAL`. There is no speculative code/stage compatibility matrix.
+`RetryHint` is `NEVER`, `MAY_RETRY` or `UNKNOWN` (default), advisory only.
+`DiagnosticCode` is separate: `CLEANUP_FAILED`, `EVENT_CALLBACK_FAILED`,
+`INSECURE_TRANSPORT`. No exception translation or diagnostic generation occurs.
+Every new enum is a standard `Enum` with uppercase string values equal to names;
+20A's existing lowercase values remain unchanged.
+
+Context is an owned read-only mapping, empty when input is `None`. It accepts
+only these six named entries; unknown keys, nesting and arbitrary objects fail:
+
+| Key | Accepted value |
+| --- | --- |
+| `action_id`, `connector_id` | ASCII `[A-Za-z0-9][A-Za-z0-9_.:-]*` |
+| `feature_id` | The three-segment 20A grammar |
+| `http_status` | Integer 100-599, not bool |
+| `schema_keyword` | ASCII `[A-Za-z_$][A-Za-z0-9_$-]*`, including `$ref` |
+| `cause_code` | Exactly an `ErrorCode.value` string, not an exception |
+
+All context text is limited to 128 ASCII characters; nothing is dropped,
+truncated, normalized or silently converted. These bounds are a predictable
+technical metadata budget, not limits on primary Feature/Action IDs. New metadata
+keys/limits can be introduced with reviewed validators, tests and documentation.
+There is no arbitrary `extra` escape hatch; JSON paths are deferred because their
+embedded property names can disclose sensitive content.
+
+### Display, equality and remaining boundaries
+
+All new values are frozen and slotted, with structural equality. Profile/schema
+identities and execution metadata are hashable. Artifacts, Feature/Collection
+results, errors and diagnostics are explicitly unhashable, even when empty.
+The localized mypy assignment exceptions for `__hash__ = None` reflect Python's
+unhashability sentinel versus the inherited callable annotation; runtime tests
+verify both `hash()` rejection and `Hashable` exclusion.
+
+Intended `repr`/`str` omit raw content, parsed data, contexts, opaque IDs and
+correlation IDs; only technical kind/status/code/stage discriminants are shown.
+Validation cannot recognize a secret deliberately disguised as a valid technical
+token. Producers must select vetted metadata. Display protection is not
+introspection, `dataclasses.asdict()`, pickle, serialization or debugger safety.
+There is no new `to_dict()`, exporter, or safe JSON serialization API. Mapping
+proxies are not directly serializable with the standard `json.dumps()`.
+
+20C does not add requests, execution controls/events, Profile loading, digest
+computation, transport, parsers, schema validators, cancellation execution,
+retries, persistence, runtime resource limits or `collect()`. Declared result
+coherence does not prove that a future execution engine obeyed its lifecycle.
