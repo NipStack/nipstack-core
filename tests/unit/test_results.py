@@ -6,8 +6,9 @@ import socket
 import time
 import uuid
 from collections.abc import Hashable
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, replace
 from datetime import UTC, datetime, timedelta
+from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -29,12 +30,12 @@ from nipstack_core import (
     ProfileIdentity,
     RawArtifact,
     SchemaIdentity,
-    ScopeHint,
     SecretValue,
     SSHEndpoint,
     TargetDescriptor,
     UsernamePasswordAuth,
 )
+from nipstack_core.contracts import results
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 SCHEMA = SchemaIdentity(digest="sha256:" + "a" * 64)
@@ -47,7 +48,6 @@ def feature() -> FeatureResult:
     return FeatureResult(
         feature_id="config.system.hostname",
         status=FeatureStatus.SUCCESS,
-        scope_hint=ScopeHint.SOURCE,
         started_at=NOW,
         finished_at=NOW,
         schema_identity=SCHEMA,
@@ -87,16 +87,35 @@ def collection() -> CollectionResult:
 
 def test_result_enums_are_standard_with_exact_vocabulary() -> None:
     assert {member.name for member in FeatureStatus} == {"SUCCESS", "FAILED", "SKIPPED"}
-    assert {member.name for member in ScopeHint} == {"SOURCE", "MANAGED_SYSTEM"}
     assert {member.name for member in CollectionStatus} == {
         "SUCCESS",
         "PARTIAL",
         "FAILED",
         "CANCELLED",
     }
-    for enum in (FeatureStatus, ScopeHint, CollectionStatus):
+    for enum in (FeatureStatus, CollectionStatus):
         assert all(member.value == member.name for member in enum)
         assert all(not isinstance(member, str) for member in enum)
+
+
+def test_feature_result_has_no_scope_field_or_compatibility_shim() -> None:
+    expected = {
+        "feature_id",
+        "status",
+        "started_at",
+        "finished_at",
+        "schema_identity",
+        "data",
+        "error",
+        "source_artifact_refs",
+    }
+    value = feature()
+    assert {attribute.name for attribute in fields(FeatureResult)} == expected
+    assert set(signature(FeatureResult).parameters) == expected
+    assert not hasattr(value, "scope_hint")
+    assert not hasattr(results, "ScopeHint")
+    with pytest.raises(TypeError, match="unexpected keyword argument 'scope_hint'"):
+        replace(value, scope_hint="SOURCE")
 
 
 @pytest.mark.parametrize("status", list(FeatureStatus))
@@ -133,8 +152,6 @@ def test_feature_status_matrix(
         ("feature_id", "config.system.hostname\n"),
         ("status", "SUCCESS"),
         ("status", None),
-        ("scope_hint", "SOURCE"),
-        ("scope_hint", None),
         ("schema_identity", "digest"),
         ("error", ValueError("SYNTHETIC_SECRET")),
         ("started_at", NOW.replace(tzinfo=None)),

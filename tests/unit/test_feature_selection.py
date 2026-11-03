@@ -307,7 +307,6 @@ def test_public_exports_are_real_and_consistent() -> None:
         "RawArtifactPolicy",
         "RetryHint",
         "SchemaIdentity",
-        "ScopeHint",
         "SecretValue",
         "SSHKeyAuth",
         "SSHEndpoint",
@@ -316,6 +315,9 @@ def test_public_exports_are_real_and_consistent() -> None:
     }
 
     assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
+    assert len(expected) == 33
+    assert not hasattr(nipstack_core, "ScopeHint")
+    assert not hasattr(contracts, "ScopeHint")
     for name in expected:
         assert getattr(nipstack_core, name) is getattr(contracts, name)
     assert issubclass(NipStackCoreUsageError, ValueError)

@@ -200,9 +200,18 @@ insecure-transport reporting or network operation in these contracts.
 
 The approved decisions are recorded in
 [Issue #12](https://github.com/NipStack/nipstack-core/issues/12#issuecomment-6565483601).
-20C added 16 public types and two JSON aliases, bringing both public export lists
-to 30 entries at that increment. 20D adds four names, for 34 exports. These are
-construction-time contracts, not an execution engine.
+Following the approved corrective change in
+[Issue #17](https://github.com/NipStack/nipstack-core/issues/17), 20C contributes 15
+public types and two JSON aliases, and 20D adds four names, for **33 current exports**.
+These are construction-time contracts, not an execution engine.
+
+V1 does not classify Features by scope. The former `ScopeHint` enum and
+`FeatureResult.scope_hint` constructor field have been removed, as has the
+corresponding serialized key. This is an intentional breaking correction:
+consumers must remove the old enum import and keyword argument and no longer
+expect that JSON field. There is no compatibility shim or replacement
+classification. Profile/Feature/Action identities, statuses and acquisition
+provenance remain unchanged.
 
 ### Constructors and identities
 
@@ -221,8 +230,8 @@ NipStackCoreError(*, code: ErrorCode, stage: ErrorStage,
                  context: Mapping[str, str | int] | None = None)
 NipStackCoreDiagnostic(*, code: DiagnosticCode, stage: ErrorStage,
                       context: Mapping[str, str | int] | None = None)
-FeatureResult(*, feature_id: str, status: FeatureStatus, scope_hint: ScopeHint,
-              started_at: datetime, finished_at: datetime,
+FeatureResult(*, feature_id: str, status: FeatureStatus, started_at: datetime,
+              finished_at: datetime,
               schema_identity: SchemaIdentity | None = None,
               data: JSONDocument | None = None, error: NipStackCoreError | None = None,
               source_artifact_refs: Sequence[str] = ())
@@ -309,8 +318,8 @@ the future request field belongs to 20D, and actual exposure requires both the
 Profile opt-in and caller `PROFILE_DEFAULT` in workstream 80. Instantiating this
 enum does not filter or authorize disclosure of an artifact.
 
-`FeatureStatus` has `SUCCESS`, `FAILED`, `SKIPPED`; `ScopeHint` has `SOURCE` and
-`MANAGED_SYSTEM`. Scope is required. Feature IDs use the unchanged 20A grammar.
+`FeatureStatus` has `SUCCESS`, `FAILED`, `SKIPPED`. Feature IDs use the unchanged
+20A grammar.
 
 | Feature status | Data | Schema identity | Local error |
 | --- | --- | --- | --- |
@@ -544,7 +553,7 @@ All meaningful keys are present, even when their value is null:
   `TargetDescriptor.to_dict()`.
 - Execution: `collection_id`, **`nipstack_core_version`**, `started_at`,
   `finished_at`, `duration_ms`, `correlation_id`.
-- Feature: `feature_id`, `status`, `scope_hint`, `started_at`, `finished_at`,
+- Feature: `feature_id`, `status`, `started_at`, `finished_at`,
   `schema_identity`, `data`, `error`, `source_artifact_refs`.
 - Schema identity: `digest`, `algorithm`, or null; no Profile/Feature fields.
 - Artifact: `artifact_id`, `action_id`, `kind`, `content_type`, `content`,
@@ -629,7 +638,6 @@ is the precalculated SHA-256 of the simple canonical synthetic schema
     "config.system.hostname": {
       "feature_id": "config.system.hostname",
       "status": "SUCCESS",
-      "scope_hint": "SOURCE",
       "started_at": "2026-11-02T00:00:00.006000Z",
       "finished_at": "2026-11-02T00:00:00.007000Z",
       "schema_identity": {
@@ -653,7 +661,6 @@ is the precalculated SHA-256 of the simple canonical synthetic schema
     "check.system.status": {
       "feature_id": "check.system.status",
       "status": "FAILED",
-      "scope_hint": "SOURCE",
       "started_at": "2026-11-02T00:00:00.008000Z",
       "finished_at": "2026-11-02T00:00:00.009000Z",
       "schema_identity": null,

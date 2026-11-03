@@ -166,7 +166,6 @@ jobs:
               RawArtifactPolicy,
               RetryHint,
               SchemaIdentity,
-              ScopeHint,
               SecretValue,
               SSHKeyAuth,
               SSHEndpoint,
@@ -186,10 +185,13 @@ jobs:
               "ErrorCode", "ErrorStage", "ExecutionMetadata", "FeatureResult",
               "FeatureStatus", "JSONDocument", "JSONValue", "NipStackCoreDiagnostic",
               "NipStackCoreError", "ProfileIdentity", "RawArtifact",
-              "RawArtifactPolicy", "RetryHint", "SchemaIdentity", "ScopeHint",
+              "RawArtifactPolicy", "RetryHint", "SchemaIdentity",
               "CollectionRequest", "EventKind", "ExecutionControl", "ExecutionEvent",
           }
           assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
+          assert len(expected) == 33
+          assert not hasattr(nipstack_core, "ScopeHint")
+          assert not hasattr(contracts, "ScopeHint")
           for name in expected:
               assert getattr(nipstack_core, name) is getattr(contracts, name)
           assert issubclass(NipStackCoreUsageError, ValueError)
@@ -269,7 +271,7 @@ jobs:
           )
           observed = FeatureResult(
               feature_id="config.system.hostname", status=FeatureStatus.SUCCESS,
-              scope_hint=ScopeHint.SOURCE, started_at=now, finished_at=now,
+              started_at=now, finished_at=now,
               schema_identity=schema, data=payload, source_artifact_refs=["artifact"],
           )
           local_error = NipStackCoreError(
@@ -295,6 +297,9 @@ jobs:
               "items": ({"value": "SYNTHETIC_SECRET_SENTINEL"},),
           }
           assert observed.source_artifact_refs == ("artifact",)
+          assert not hasattr(observed, "scope_hint")
+          with check.assertRaises(TypeError):
+              replace(observed, scope_hint="SOURCE")
           assert result.diagnostics == (diagnostic,)
           assert local_error.retry_hint is RetryHint.UNKNOWN
           assert RawArtifactPolicy.PROFILE_DEFAULT.value == "PROFILE_DEFAULT"
@@ -363,6 +368,7 @@ jobs:
           assert "SYNTHETIC_SECRET_SENTINEL" in rendered
           assert output["execution"]["started_at"] == "2026-01-01T00:00:00.000000Z"
           assert output["features"][observed.feature_id]["source_artifact_refs"] == ["artifact"]
+          assert all("scope_hint" not in feature for feature in output["features"].values())
           assert output["target"] == credential_target.to_descriptor().to_dict()
           output["features"][observed.feature_id]["data"]["items"].clear()
           assert result.to_dict()["features"][observed.feature_id]["data"]["items"]

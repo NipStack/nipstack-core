@@ -17,7 +17,7 @@ from .operational_errors import (
     RetryHint,
 )
 from .requests import CollectionRequest
-from .results import CollectionResult, CollectionStatus, FeatureResult, FeatureStatus, ScopeHint
+from .results import CollectionResult, CollectionStatus, FeatureResult, FeatureStatus
 from .secrets import SecretValue
 
 __all__ = [
@@ -49,7 +49,6 @@ __all__ = [
     "RawArtifactPolicy",
     "RetryHint",
     "SchemaIdentity",
-    "ScopeHint",
     "SecretValue",
     "SSHKeyAuth",
     "SSHEndpoint",
