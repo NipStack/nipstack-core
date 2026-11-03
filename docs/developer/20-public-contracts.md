@@ -2,8 +2,8 @@
 
 Public contracts are exported from both `nipstack_core` and
 `nipstack_core.contracts` and depend only on the standard library. They cover
-explicit Feature selection, offline connection-target data, and immutable result
-values. The accepted
+explicit Feature selection, offline connection-target data, immutable results,
+request/control/event contracts, and explicit JSON-compatible result output. The accepted
 initial selection contract is recorded in
 [Issue #8](https://github.com/NipStack/nipstack-core/issues/8#issuecomment-6512866322).
 
@@ -180,7 +180,8 @@ from endpoint representations.
 contract validation and future Connector use. It is not an authorization mechanism
 and must not be used for logging, public output or persistence.
 
-Only `TargetDescriptor` offers public serialization. **Do not use or advertise
+Only `TargetDescriptor` and `CollectionResult` offer public `to_dict()` conversion.
+Neither serializes credential-bearing objects. **Do not use or advertise
 `dataclasses.asdict()`, `vars()`, pickle or reflective serializers as safe for
 Targets, authentication or secret values.** Masked representation does not protect
 reflection. Python introspection, debuggers, memory dumps, deliberate access to
@@ -199,8 +200,9 @@ insecure-transport reporting or network operation in these contracts.
 
 The approved decisions are recorded in
 [Issue #12](https://github.com/NipStack/nipstack-core/issues/12#issuecomment-6565483601).
-20C adds 16 public types and two JSON aliases, bringing both public export lists
-to 30 entries. These are construction-time contracts, not an execution engine.
+20C added 16 public types and two JSON aliases, bringing both public export lists
+to 30 entries at that increment. 20D adds four names, for 34 exports. These are
+construction-time contracts, not an execution engine.
 
 ### Constructors and identities
 
@@ -405,10 +407,304 @@ correlation IDs; only technical kind/status/code/stage discriminants are shown.
 Validation cannot recognize a secret deliberately disguised as a valid technical
 token. Producers must select vetted metadata. Display protection is not
 introspection, `dataclasses.asdict()`, pickle, serialization or debugger safety.
-There is no new `to_dict()`, exporter, or safe JSON serialization API. Mapping
-proxies are not directly serializable with the standard `json.dumps()`.
+The 20D `CollectionResult.to_dict()` described below is the explicit result
+conversion route. There is no generic reflective serializer or exporter.
+Mapping proxies themselves are not directly serializable with `json.dumps()`.
 
 20C does not add requests, execution controls/events, Profile loading, digest
 computation, transport, parsers, schema validators, cancellation execution,
 retries, persistence, runtime resource limits or `collect()`. Declared result
 coherence does not prove that a future execution engine obeyed its lifecycle.
+
+## Requests, control, events and result JSON (20D)
+
+The approved decisions and definitive selection/integer clarifications are recorded in
+[Issue #14](https://github.com/NipStack/nipstack-core/issues/14#issuecomment-6591437699).
+The four additional exports are `CollectionRequest`, `ExecutionControl`,
+`ExecutionEvent` and `EventKind`. All previous exports and constructor invariants
+remain unchanged. Contract completion does **not** mean collection is executable:
+`collect()` remains absent.
+
+### Explicit one-target request
+
+```text
+CollectionRequest(*, profile_id: str, target: ConnectionTarget,
+                  selection: FeatureSelection,
+                  raw_artifact_policy: RawArtifactPolicy = RawArtifactPolicy.NONE,
+                  correlation_id: str | None = None,
+                  execution_control: ExecutionControl | None = None)
+```
+
+The request is frozen, slotted and keyword-only, with identity equality and
+identity hashing. It requires a preconstructed `ConnectionTarget` and explicit
+`FeatureSelection`. **`FeatureSelection.all()` is accepted when explicitly supplied;
+omitting selection raises native `TypeError`, never an implicit ALL.**
+Profile and correlation identifiers follow the same opaque-string conventions as
+20C; no Profile lookup or Feature resolution occurs. Strings are not accepted in
+place of Target, selection or policy types.
+
+The optional control is retained verbatim, not inspected, copied, invoked,
+displayed, compared or hashed. It is statically typed, not shape-validated at
+runtime. The immutable envelope may therefore refer to a live caller-owned control.
+Intended request `repr`/`str` show only the validated raw-policy discriminator;
+they omit Target, selection, identifiers and control. No request `to_dict()`,
+`to_json()` or other public serializer exists. Reflection is not credential-safe.
+
+### Synchronous control interface
+
+```python
+from typing import Protocol
+
+from nipstack_core import ExecutionEvent
+
+
+class ExecutionControl(Protocol):
+    def should_cancel(self) -> bool: ...
+
+    def on_event(self, event: ExecutionEvent) -> None: ...
+```
+
+This structural interface is not `@runtime_checkable`, a concrete controller,
+or an event dispatcher. It does not schedule tasks, create queues/threads,
+poll cancellation or emit events. Runtime checking of attribute presence would
+not establish callability, signatures, return types or safe behavior.
+
+Workstream 80 must implement the already-defined failure semantics: an exception
+from `should_cancel()` stops further acquisition with `EXECUTION_CONTROL_ERROR`;
+an `on_event()` exception produces nonfatal `EVENT_CALLBACK_FAILED` and disables
+later callbacks. These are **not implemented or verified runtime behaviors in
+20D**. Cooperative cancellation cannot immediately interrupt arbitrary blocking
+SSH/HTTP calls; future finite Connector timeouts remain necessary.
+
+### Metadata-only observations
+
+```text
+ExecutionEvent(*, kind: EventKind, timestamp: datetime, collection_id: str,
+               correlation_id: str | None = None, profile_id: str | None = None,
+               action_id: str | None = None, feature_id: str | None = None,
+               status: FeatureStatus | CollectionStatus | None = None,
+               error_code: ErrorCode | None = None,
+               duration_ms: float | None = None)
+```
+
+`EventKind` is a standard Enum whose values exactly equal these names:
+
+```text
+COLLECTION_STARTED PLAN_READY SESSION_OPENED FINGERPRINT_FINISHED
+ACTION_STARTED ACTION_FINISHED SESSION_CLOSED FEATURE_STARTED
+FEATURE_FINISHED COLLECTION_FINISHED
+```
+
+Events are frozen/slotted, structurally equal and hashable. Kind, timestamp and
+collection ID are required. Timestamp follows the existing UTC-only convention;
+optional duration follows the finite nonnegative millisecond rule. Neither time
+nor identifiers are generated. Optional metadata may be absent, including on
+terminal events. When supplied, `status` must be:
+
+| Event kind | Supplied status |
+| --- | --- |
+| `FEATURE_FINISHED` | `FeatureStatus` |
+| `COLLECTION_FINISHED` | `CollectionStatus` |
+| Other kinds | Forbidden (`None` only) |
+
+An `ACTION_FINISHED` may carry duration and an existing ErrorCode, not an invented
+Action-status taxonomy. No full required-field transition matrix, lifecycle
+proof or code/status compatibility matrix is imposed ahead of runtime work.
+Opaque collection/correlation/Profile/Action IDs follow 20C text validation;
+Feature IDs follow the 20A grammar when present. Primary IDs have no context-only
+128-character limit.
+
+No payload, raw output, complete FeatureData, credentials, headers, URLs,
+commands, arbitrary context or free-form message fields exist. Producers must
+use vetted technical IDs: syntax cannot recognize a secret or command deliberately
+disguised as an ID. Intended display hides IDs and timing metadata, showing only
+validated kind/status/error-code discriminants. There is no event serializer,
+telemetry or logging-handler API.
+
+### Explicit result conversion
+
+```text
+CollectionResult.to_dict(self) -> dict[str, JSONValue]
+```
+
+This is the sole new public conversion route. It explicitly traverses current
+result fields, not arbitrary dataclasses or attributes. It returns fresh plain
+dict/list containers, existing Enum `.value` strings, fixed microsecond UTC
+timestamps (`YYYY-MM-DDTHH:MM:SS.ffffffZ`), and valid scalar values.
+Use ordinary `json.dumps(result.to_dict())`, with no custom default or encoder.
+There is no public `result_to_dict`, `to_json`, deserializer, format exporter,
+raw-policy argument or persistence layer.
+
+All meaningful keys are present, even when their value is null:
+
+- Collection: `status`, `profile`, `target`, `execution`, `features`, `artifacts`,
+  `error`, `diagnostics`.
+- Profile: `profile_id`, `version`.
+- Target: exactly `scheme`, `host`, `port`, via the existing credential-free
+  `TargetDescriptor.to_dict()`.
+- Execution: `collection_id`, **`nipstack_core_version`**, `started_at`,
+  `finished_at`, `duration_ms`, `correlation_id`.
+- Feature: `feature_id`, `status`, `scope_hint`, `started_at`, `finished_at`,
+  `schema_identity`, `data`, `error`, `source_artifact_refs`.
+- Schema identity: `digest`, `algorithm`, or null; no Profile/Feature fields.
+- Artifact: `artifact_id`, `action_id`, `kind`, `content_type`, `content`,
+  `acquired_at`, `duration_ms`.
+- Error: `code`, `stage`, `retry_hint`, `context`, fixed `message`, or null.
+- Diagnostic: `code`, `stage`, `context`, fixed `message`; no retry hint.
+
+Features and artifacts remain ID-keyed objects; their insertion order is
+preserved, as are array/reference/diagnostic orders. Repeated calls on the same
+result are deterministic and independent, not views of frozen containers.
+Changing the returned dictionaries/lists cannot change the result or a subsequent
+conversion. Mapping equality does not promise identical bytes for independently
+constructed values with different insertion orders. This is not JCS output.
+
+The 64-container limit belongs to each 20C JSON payload, not to the entire output
+envelope. It is not reapplied to the added Collection/Feature wrapper levels.
+20C already rejects unsupported values, cycles, invalid Unicode, nonfinite floats
+and invalid timestamps. Conversion does not recompute schema identity, reinterpret
+status/provenance or perform Schema validation.
+
+#### Standard JSON integer compatibility
+
+20C's arbitrary Python integer acceptance is preserved. Conversion checks
+integers using the standard JSON encoder under the **current interpreter
+settings**. If an integer cannot be encoded, `to_dict()` raises
+`NipStackCoreUsageError` with a fixed safe message, without echoing its value or
+the containing key. It does not silently turn integers into strings, change
+`sys.set_int_max_str_digits()`, truncate data or return a partial output.
+Ordinary integers and large encodable integers remain integers.
+
+Compatibility reflects settings at conversion time; changing interpreter settings
+afterward can change later encoding behavior. Memory/CPU exhaustion and downstream
+consumer numeric limits are separate concerns, not solved by this check. Future
+RuntimeLimits must address resource budgets.
+
+#### Exposure and credential boundary
+
+Only the already-constructed CollectionResult and its credential-free descriptor
+are traversed. No request, ConnectionTarget, auth or ExecutionControl is accessed;
+`SecretValue.reveal()` is never invoked.
+
+Hidden artifact content stays null; present raw content, empty strings/objects/
+arrays and parsed FeatureData are preserved faithfully. The converter has no
+Profile/request permission context and **does not enforce** raw double opt-in.
+Workstream 80 must require both Profile `expose_by_default=true` and caller
+`PROFILE_DEFAULT` before exposing raw in real collection results.
+
+**The output may contain sensitive configurations, observations, topology, IDs
+or technical context.** Credential-object exclusion and sanitized messages do
+not provide general redaction or anonymization. Strings deliberately containing
+secrets cannot be identified automatically while preserving legitimate data.
+Producers/consumers own access, retention, redaction and storage policies.
+
+### Complete synthetic JSON example
+
+The following output corresponds to a valid PARTIAL result, with one successful
+and one failed Feature referencing the same acquired, masked artifact. The digest
+is the precalculated SHA-256 of the simple canonical synthetic schema
+`{"type":"object"}`; conversion does not compute it.
+
+```json
+{
+  "status": "PARTIAL",
+  "profile": {
+    "profile_id": "example.synthetic",
+    "version": "1.0"
+  },
+  "target": {
+    "scheme": "ssh",
+    "host": "switch.example.invalid",
+    "port": 22
+  },
+  "execution": {
+    "collection_id": "demo-20d",
+    "nipstack_core_version": "0.1.0",
+    "started_at": "2026-11-02T00:00:00.000000Z",
+    "finished_at": "2026-11-02T00:00:00.020000Z",
+    "duration_ms": 20.0,
+    "correlation_id": "demo-correlation"
+  },
+  "features": {
+    "config.system.hostname": {
+      "feature_id": "config.system.hostname",
+      "status": "SUCCESS",
+      "scope_hint": "SOURCE",
+      "started_at": "2026-11-02T00:00:00.006000Z",
+      "finished_at": "2026-11-02T00:00:00.007000Z",
+      "schema_identity": {
+        "digest": "sha256:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+        "algorithm": "schema-c14n-v1"
+      },
+      "data": {
+        "hostname": "edge-lab",
+        "interfaces": [
+          {
+            "name": "Ethernet1",
+            "addresses": [],
+            "enabled": true
+          }
+        ],
+        "note": null
+      },
+      "error": null,
+      "source_artifact_refs": ["raw-1"]
+    },
+    "check.system.status": {
+      "feature_id": "check.system.status",
+      "status": "FAILED",
+      "scope_hint": "SOURCE",
+      "started_at": "2026-11-02T00:00:00.008000Z",
+      "finished_at": "2026-11-02T00:00:00.009000Z",
+      "schema_identity": null,
+      "data": null,
+      "error": {
+        "code": "PARSE_ERROR",
+        "stage": "PARSING",
+        "retry_hint": "UNKNOWN",
+        "context": {"action_id": "read_system"},
+        "message": "Parse error."
+      },
+      "source_artifact_refs": ["raw-1"]
+    }
+  },
+  "artifacts": {
+    "raw-1": {
+      "artifact_id": "raw-1",
+      "action_id": "read_system",
+      "kind": "configuration_snapshot",
+      "content_type": "text/plain",
+      "content": null,
+      "acquired_at": "2026-11-02T00:00:00.005000Z",
+      "duration_ms": 1.5
+    }
+  },
+  "error": null,
+  "diagnostics": [
+    {
+      "code": "CLEANUP_FAILED",
+      "stage": "CLEANUP",
+      "context": {"connector_id": "ssh", "cause_code": "CLEANUP_ERROR"},
+      "message": "Cleanup failed."
+    }
+  ]
+}
+```
+
+An early FAILED result can have `profile.version=null`, empty features/artifacts,
+and a required global `PROFILE_NOT_FOUND` error. CANCELLED requires the global
+`CANCELLED` error and may retain completed results. These are unchanged 20C
+invariants, not serializers' inferences.
+
+### Contract acceptance versus future execution
+
+20A supplies explicit selection; 20B supplies offline target/auth data and safe
+descriptor projection; 20C supplies immutable provenance/results/errors; 20D
+composes requests, control/event data and explicit JSON result conversion.
+Unit, type and installed-wheel tests exercise these contracts offline.
+
+No collection engine, Profile loading, Connector/Session, runtime event
+production, callback execution, cancellation, raw filtering, automatic retry,
+JCS calculation, Schema validation, persistence or exporter is supplied. The
+public `collect(request) -> CollectionResult` remains a future API, not an
+implemented placeholder.

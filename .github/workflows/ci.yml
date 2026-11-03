@@ -96,6 +96,7 @@ jobs:
               for module in (
                   "secrets", "authentication", "connection_target", "json_data",
                   "identities", "operational_errors", "artifacts", "results",
+                  "requests", "events", "serialization",
               ):
                   assert f"nipstack_core/contracts/{module}.py" in members
               assert not any(item.endswith("/AGENTS.md") for item in members)
@@ -112,6 +113,7 @@ jobs:
               for module in (
                   "secrets", "authentication", "connection_target", "json_data",
                   "identities", "operational_errors", "artifacts", "results",
+                  "requests", "events", "serialization",
               ):
                   assert any(
                       item.endswith(f"/src/nipstack_core/contracts/{module}.py")
@@ -128,6 +130,7 @@ jobs:
           uv pip install --python .venv-wheel/bin/python dist/*.whl
           .venv-wheel/bin/python -I - <<'PY'
           import json
+          import sys
           from dataclasses import FrozenInstanceError, replace
           from datetime import UTC, datetime
           from importlib import resources
@@ -138,12 +141,16 @@ jobs:
           import nipstack_core
           from nipstack_core import (
               BearerTokenAuth,
+              CollectionRequest,
               CollectionResult,
               CollectionStatus,
               ConnectionTarget,
               DiagnosticCode,
               ErrorCode,
               ErrorStage,
+              EventKind,
+              ExecutionControl,
+              ExecutionEvent,
               ExecutionMetadata,
               FeatureResult,
               FeatureSelection,
@@ -180,6 +187,7 @@ jobs:
               "FeatureStatus", "JSONDocument", "JSONValue", "NipStackCoreDiagnostic",
               "NipStackCoreError", "ProfileIdentity", "RawArtifact",
               "RawArtifactPolicy", "RetryHint", "SchemaIdentity", "ScopeHint",
+              "CollectionRequest", "EventKind", "ExecutionControl", "ExecutionEvent",
           }
           assert set(nipstack_core.__all__) == set(contracts.__all__) == expected
           for name in expected:
@@ -311,7 +319,68 @@ jobs:
               replace(observed, data="not-an-array")
           with check.assertRaises(NipStackCoreUsageError):
               replace(local_error, context={"exception": "unsafe"})
+
+          class Control:
+              def should_cancel(self) -> bool:
+                  raise AssertionError("Contracts must not poll cancellation")
+
+              def on_event(self, event: ExecutionEvent) -> None:
+                  raise AssertionError("Contracts must not emit events")
+
+              def __repr__(self) -> str:
+                  raise AssertionError("Contracts must not display controls")
+
+          control: ExecutionControl = Control()
+          credential_target = ConnectionTarget(
+              endpoint=https,
+              authentication=BearerTokenAuth(token=SecretValue("SYNTHETIC_CREDENTIAL_ONLY")),
+          )
+          request = CollectionRequest(
+              profile_id="synthetic-profile", target=credential_target,
+              selection=FeatureSelection.all(), execution_control=control,
+          )
+          assert request.selection.kind is FeatureSelectionKind.ALL
+          assert request.raw_artifact_policy is RawArtifactPolicy.NONE
+          assert request.execution_control is control
+          assert "SYNTHETIC_CREDENTIAL_ONLY" not in str(request) + repr(request)
+          assert not hasattr(request, "to_dict")
+          with check.assertRaises(TypeError):
+              CollectionRequest(profile_id="synthetic-profile", target=credential_target)
+          with check.assertRaises(FrozenInstanceError):
+              request.selection = FeatureSelection.all()
+          event = ExecutionEvent(
+              kind=EventKind.FEATURE_FINISHED, timestamp=now, collection_id="synthetic-collection",
+              feature_id=observed.feature_id, status=FeatureStatus.SUCCESS, duration_ms=0,
+          )
+          assert event.duration_ms == 0.0 and event == replace(event)
+          assert hash(event) == hash(replace(event))
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(event, status=CollectionStatus.SUCCESS)
+          result = replace(result, target=credential_target.to_descriptor())
+          output = result.to_dict()
+          rendered = json.dumps(output, allow_nan=False)
+          assert "SYNTHETIC_CREDENTIAL_ONLY" not in rendered
+          assert "SYNTHETIC_SECRET_SENTINEL" in rendered
+          assert output["execution"]["started_at"] == "2026-01-01T00:00:00.000000Z"
+          assert output["features"][observed.feature_id]["source_artifact_refs"] == ["artifact"]
+          assert output["target"] == credential_target.to_descriptor().to_dict()
+          output["features"][observed.feature_id]["data"]["items"].clear()
+          assert result.to_dict()["features"][observed.feature_id]["data"]["items"]
+          hidden_result = replace(result, artifacts={"artifact": replace(artifact, content=None)})
+          assert hidden_result.to_dict()["artifacts"]["artifact"]["content"] is None
+          json.dumps(hidden_result.to_dict())
+          for value in (42, 10 ** 100):
+              integer_result = replace(result, artifacts={"artifact": replace(artifact, content=value)})
+              assert integer_result.to_dict()["artifacts"]["artifact"]["content"] == value
+              json.dumps(integer_result.to_dict())
+          digit_limit = sys.get_int_max_str_digits()
+          if digit_limit:
+              incompatible = replace(
+                  result, artifacts={"artifact": replace(artifact, content=10 ** digit_limit)},
+              )
+              with check.assertRaises(NipStackCoreUsageError):
+                  incompatible.to_dict()
+              assert sys.get_int_max_str_digits() == digit_limit
           assert not hasattr(nipstack_core, "collect")
-          assert not hasattr(nipstack_core, "CollectionRequest")
           print("Installed nipstack-core version:", version("nipstack-core"))
           PY

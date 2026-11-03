@@ -359,7 +359,8 @@ def test_results_are_frozen_slotted_structurally_equal_and_unhashable(value: obj
         hash(value)
     with pytest.raises(FrozenInstanceError):
         value.status = "changed"
-    assert not hasattr(value, "to_dict")
+    if isinstance(value, FeatureResult):
+        assert not hasattr(value, "to_dict")
     with pytest.raises(TypeError):
         type(value)("value")
 
@@ -432,5 +433,5 @@ def test_result_construction_is_offline_and_does_not_read_runtime_state(
         assert collection() == collection()
         assert raw() == raw()
         assert feature() == feature()
-    for name in ("collect", "CollectionRequest", "ExecutionControl", "ProgressEvent"):
+    for name in ("collect", "ProgressEvent"):
         assert not hasattr(nipstack_core, name)

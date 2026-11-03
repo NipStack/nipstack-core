@@ -17,8 +17,9 @@ from .identities import (
     _validate_text,
     _validate_time_range,
 )
-from .json_data import JSONDocument, _freeze_json_document
+from .json_data import JSONDocument, JSONValue, _freeze_json_document
 from .operational_errors import ErrorCode, NipStackCoreDiagnostic, NipStackCoreError
+from .serialization import _collection_result_to_dict
 
 
 class FeatureStatus(Enum):
@@ -107,7 +108,7 @@ class CollectionResult:
     """One target's declared outcome with immutable keyed results and diagnostics.
 
     Only the credential-free TargetDescriptor is accepted. No planning,
-    acquisition, schema validation, raw filtering or public serialization occurs.
+    acquisition, schema validation or raw filtering occurs.
 
     Raises:
         NipStackCoreUsageError: Types, provenance, Profile version or status are incoherent.
@@ -149,6 +150,25 @@ class CollectionResult:
         object.__setattr__(self, "features", features)
         object.__setattr__(self, "artifacts", artifacts)
         object.__setattr__(self, "diagnostics", diagnostics)
+
+    def to_dict(self) -> dict[str, JSONValue]:
+        """Return a complete JSON-compatible snapshot with independent containers.
+
+        Only result fields and the credential-free TargetDescriptor are traversed.
+        Present raw content and parsed data are preserved and may be sensitive:
+        this does not enforce runtime raw permissions, redaction or retention.
+        Integer compatibility is checked under the current JSON encoder settings;
+        no global Python limits are changed. Resource exhaustion is not prevented.
+
+        Returns:
+            Fresh dict/list containers with enum strings, UTC microsecond Z
+            timestamps, explicit nulls and unchanged valid scalar data.
+
+        Raises:
+            NipStackCoreUsageError: JSON data is unsupported or an integer cannot
+                be encoded by the standard JSON encoder.
+        """
+        return _collection_result_to_dict(self)
 
 
 def _freeze_artifact_refs(value: Sequence[str]) -> tuple[str, ...]:

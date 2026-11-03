@@ -5,12 +5,16 @@ Public APIs are introduced incrementally as the approved contracts are implement
 
 from .contracts import (
     BearerTokenAuth,
+    CollectionRequest,
     CollectionResult,
     CollectionStatus,
     ConnectionTarget,
     DiagnosticCode,
     ErrorCode,
     ErrorStage,
+    EventKind,
+    ExecutionControl,
+    ExecutionEvent,
     ExecutionMetadata,
     FeatureResult,
     FeatureSelection,
@@ -38,12 +42,16 @@ from .contracts import (
 
 __all__ = [
     "BearerTokenAuth",
+    "CollectionRequest",
     "CollectionResult",
     "CollectionStatus",
     "ConnectionTarget",
     "DiagnosticCode",
     "ErrorCode",
     "ErrorStage",
+    "EventKind",
+    "ExecutionControl",
+    "ExecutionEvent",
     "ExecutionMetadata",
     "FeatureResult",
     "FeatureSelection",
