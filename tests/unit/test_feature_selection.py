@@ -280,12 +280,16 @@ def test_repr_describes_kind_and_values() -> None:
 def test_public_exports_are_real_and_consistent() -> None:
     expected = {
         "BearerTokenAuth",
+        "CollectionRequest",
         "CollectionResult",
         "CollectionStatus",
         "ConnectionTarget",
         "DiagnosticCode",
         "ErrorCode",
         "ErrorStage",
+        "EventKind",
+        "ExecutionControl",
+        "ExecutionEvent",
         "ExecutionMetadata",
         "FeatureResult",
         "FeatureSelection",
