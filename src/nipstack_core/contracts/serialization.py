@@ -58,7 +58,6 @@ def _feature_to_dict(feature: FeatureResult) -> dict[str, JSONValue]:
     return {
         "feature_id": feature.feature_id,
         "status": feature.status.value,
-        "scope_hint": feature.scope_hint.value,
         "started_at": _timestamp_to_text(feature.started_at),
         "finished_at": _timestamp_to_text(feature.finished_at),
         "schema_identity": _schema_to_dict(feature.schema_identity),

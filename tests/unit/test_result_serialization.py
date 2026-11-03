@@ -38,7 +38,6 @@ from nipstack_core import (
     RawArtifact,
     RetryHint,
     SchemaIdentity,
-    ScopeHint,
     SecretValue,
     SSHEndpoint,
     SSHKeyAuth,
@@ -66,7 +65,6 @@ def partial_result() -> CollectionResult:
     good = FeatureResult(
         feature_id="config.system.hostname",
         status=FeatureStatus.SUCCESS,
-        scope_hint=ScopeHint.SOURCE,
         started_at=NOW + timedelta(milliseconds=6),
         finished_at=NOW + timedelta(milliseconds=7),
         schema_identity=schema,
@@ -80,7 +78,6 @@ def partial_result() -> CollectionResult:
     bad = FeatureResult(
         feature_id="check.system.status",
         status=FeatureStatus.FAILED,
-        scope_hint=ScopeHint.SOURCE,
         started_at=NOW + timedelta(milliseconds=8),
         finished_at=NOW + timedelta(milliseconds=9),
         error=NipStackCoreError(
@@ -133,7 +130,6 @@ def test_complete_partial_output_is_exact_and_directly_json_encodable(
             "config.system.hostname": {
                 "feature_id": "config.system.hostname",
                 "status": "SUCCESS",
-                "scope_hint": "SOURCE",
                 "started_at": "2026-11-02T00:00:00.006000Z",
                 "finished_at": "2026-11-02T00:00:00.007000Z",
                 "schema_identity": {"digest": DIGEST, "algorithm": "schema-c14n-v1"},
@@ -148,7 +144,6 @@ def test_complete_partial_output_is_exact_and_directly_json_encodable(
             "check.system.status": {
                 "feature_id": "check.system.status",
                 "status": "FAILED",
-                "scope_hint": "SOURCE",
                 "started_at": "2026-11-02T00:00:00.008000Z",
                 "finished_at": "2026-11-02T00:00:00.009000Z",
                 "schema_identity": None,
@@ -199,6 +194,45 @@ def test_complete_partial_output_is_exact_and_directly_json_encodable(
         "diagnostics",
     ]
     assert list(output["features"]) == list(partial_result.features)
+
+
+@pytest.mark.parametrize("status", list(FeatureStatus))
+def test_serialized_features_have_no_scope_hint(
+    partial_result: CollectionResult,
+    status: FeatureStatus,
+) -> None:
+    observed = next(iter(partial_result.features.values()))
+    collection_status = CollectionStatus.SUCCESS
+    if status is not FeatureStatus.SUCCESS:
+        observed = replace(
+            observed,
+            status=status,
+            data=None,
+            error=NipStackCoreError(code=ErrorCode.PARSE_ERROR, stage=ErrorStage.PARSING),
+        )
+        collection_status = CollectionStatus.FAILED
+    result = replace(
+        partial_result,
+        status=collection_status,
+        features={observed.feature_id: observed},
+    )
+    output = result.to_dict()
+    serialized = output["features"][observed.feature_id]
+    assert "scope_hint" not in serialized
+    assert set(serialized) == {
+        "feature_id",
+        "status",
+        "started_at",
+        "finished_at",
+        "schema_identity",
+        "data",
+        "error",
+        "source_artifact_refs",
+    }
+    assert serialized["feature_id"] == observed.feature_id
+    assert serialized["status"] == status.value
+    assert serialized["source_artifact_refs"] == ["raw-1"]
+    assert json.loads(json.dumps(output)) == output
 
 
 @pytest.mark.parametrize("status", list(CollectionStatus))
@@ -285,15 +319,12 @@ def test_observation_shape_empty_values_and_unicode_are_preserved(
     partial_result: CollectionResult,
     data: object,
 ) -> None:
-    good = replace(
-        next(iter(partial_result.features.values())), data=data, scope_hint=ScopeHint.MANAGED_SYSTEM
-    )
+    good = replace(next(iter(partial_result.features.values())), data=data)
     output = replace(
         partial_result, status=CollectionStatus.SUCCESS, features={good.feature_id: good}
     ).to_dict()
     expected = [] if isinstance(data, tuple) else data
     assert output["features"][good.feature_id]["data"] == expected
-    assert output["features"][good.feature_id]["scope_hint"] == "MANAGED_SYSTEM"
     assert json.loads(json.dumps(output, ensure_ascii=False)) == output
 
 

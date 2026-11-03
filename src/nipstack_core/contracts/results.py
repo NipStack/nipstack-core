@@ -30,13 +30,6 @@ class FeatureStatus(Enum):
     SKIPPED = "SKIPPED"
 
 
-class ScopeHint(Enum):
-    """Whether an observation describes its source or the system managed by it."""
-
-    SOURCE = "SOURCE"
-    MANAGED_SYSTEM = "MANAGED_SYSTEM"
-
-
 class CollectionStatus(Enum):
     """Explicit Collection outcome, validated rather than inferred."""
 
@@ -60,7 +53,6 @@ class FeatureResult:
 
     feature_id: str = field(repr=False)
     status: FeatureStatus
-    scope_hint: ScopeHint
     started_at: datetime = field(repr=False)
     finished_at: datetime = field(repr=False)
     schema_identity: SchemaIdentity | None = field(default=None, repr=False)
@@ -77,8 +69,6 @@ class FeatureResult:
             )
         if not isinstance(self.status, FeatureStatus):
             raise NipStackCoreUsageError("status must be a FeatureStatus.")
-        if not isinstance(self.scope_hint, ScopeHint):
-            raise NipStackCoreUsageError("scope_hint must be a ScopeHint.")
         if self.schema_identity is not None and not isinstance(
             self.schema_identity, SchemaIdentity
         ):
