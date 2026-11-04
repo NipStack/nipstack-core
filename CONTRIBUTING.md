@@ -73,6 +73,30 @@ uv build
 
 The GitHub Actions workflow defines required CI checks, including the configured Python matrix and package installation smoke tests. Do not claim a check passed unless it actually ran; report justified omissions.
 
+### Distribution verification
+
+After building, run the same distribution checks as the CI `package` job:
+
+```bash
+uv run --no-sync python tests/packaging/check_distributions.py dist
+```
+
+Use a directory containing exactly one wheel and one sdist. The runner verifies
+that both archives include the source package's modules, resources and `py.typed`,
+excludes test fakes from both, and excludes `AGENTS.md` from the wheel.
+It then installs each artifact independently into a temporary environment, bypassing
+cached builds, and runs the installed smoke with `python -I` outside the checkout.
+Every imported NipStack module must resolve inside that environment; installed
+metadata, exports, typing and minimal synthetic API usage are checked.
+Temporary environments are removed automatically, including on failure.
+Installation may access the package index for build/runtime dependencies; it never
+contacts a network device.
+
+Functional validation matrices remain in the ordinary offline pytest suite, which
+also tests the distribution runner's missing-file, fake-exclusion, isolation and
+failure-propagation guards without requiring built artifacts. New package files
+are checked automatically without extending a module list in the workflow.
+
 Use offline deterministic tests and synthetic or explicitly approved sanitized fixtures. Network hardware tests are separate and require explicit, scoped authorization. Do not ship FakeConnector/FakeSession in distributions.
 
 ## Documentation policy
