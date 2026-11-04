@@ -99,6 +99,8 @@ jobs:
                   "requests", "events", "serialization",
               ):
                   assert f"nipstack_core/contracts/{module}.py" in members
+              for module in ("actions", "features", "profile"):
+                  assert f"nipstack_core/profiles/{module}.py" in members
               assert not any(item.endswith("/AGENTS.md") for item in members)
           with tarfile.open(sdists[0], "r:gz") as archive:
               source_members = archive.getnames()
@@ -106,6 +108,11 @@ jobs:
                   item.endswith("/src/nipstack_core/contracts/feature_selection.py")
                   for item in source_members
               )
+              for module in ("actions", "features", "profile"):
+                  assert any(
+                      item.endswith(f"/src/nipstack_core/profiles/{module}.py")
+                      for item in source_members
+                  )
               assert any(
                   item.endswith("/src/nipstack_core/py.typed")
                   for item in source_members
@@ -388,5 +395,84 @@ jobs:
                   incompatible.to_dict()
               assert sys.get_int_max_str_digits() == digit_limit
           assert not hasattr(nipstack_core, "collect")
+          from nipstack_core.profiles import (
+              ArtifactDefinition, CLIActionDefinition, CLIContextDefinition,
+              ConnectionDefinition, FeatureDefinition, FingerprintDefinition,
+              HTTPActionDefinition, HTTPRequestDefinition, ParserDefinition,
+              ProfileDefinition, ProfileMetadata,
+          )
+
+          cli_action = CLIActionDefinition(
+              action_id="show_version", command="show version",
+              artifact=ArtifactDefinition(kind="command_output"),
+              context=CLIContextDefinition(enter=["enter"], exit=["exit", "exit"]),
+          )
+          cli_feature = FeatureDefinition(
+              feature_id="check.global.show_version", inputs=["show_version"],
+              parser=ParserDefinition(engine="native", template="features/version/parser.yaml"),
+              schema="features/version/schema.json",
+          )
+          cli_profile = ProfileDefinition(
+              profile_id="example.switch.cli", version="1.0.0",
+              metadata=ProfileMetadata(
+                  name="Example CLI", vendor="example",
+                  platform_id="example.switch", access_variant="cli",
+              ),
+              connection=ConnectionDefinition(connector="ssh", driver="example_cli"),
+              actions={"show_version": cli_action}, features={cli_feature.feature_id: cli_feature},
+              fingerprint=FingerprintDefinition(action_id="show_version", include=["ExampleOS"]),
+          )
+          query = [("item", "first"), ("item", "second"), ("literal", "%2F")]
+          headers = {"Accept": "application/vendor+json"}
+          body = {"items": ["original"]}
+          post = HTTPRequestDefinition(
+              path="/api/query", method="POST", query=query, headers=headers, body=body,
+          )
+          query.clear()
+          headers.clear()
+          body["items"].clear()
+          assert post.query == (("item", "first"), ("item", "second"), ("literal", "%2F"))
+          assert post.headers == {"Accept": "application/vendor+json"}
+          assert post.body == {"items": ("original",)}
+          api_action = HTTPActionDefinition(
+              action_id="read_status", request=post,
+              artifact=ArtifactDefinition(kind="api_response"),
+          )
+          api_feature = replace(
+              cli_feature, inputs=["read_status"],
+              parser=ParserDefinition(engine="jmespath", template="features/version/parser.jmespath"),
+          )
+          api_profile = ProfileDefinition(
+              profile_id="example.switch.api", version="1.0.0",
+              metadata=replace(cli_profile.metadata, access_variant="api"),
+              connection=ConnectionDefinition(connector="http", authentication="basic"),
+              actions={"read_status": api_action}, features={api_feature.feature_id: api_feature},
+          )
+          assert list(cli_profile.features) == list(api_profile.features)
+          assert cli_profile.metadata.platform_id == api_profile.metadata.platform_id
+          assert len(nipstack_core.__all__) == 33
+          assert not hasattr(nipstack_core, "ProfileDefinition")
+          assert not hasattr(cli_feature, "scope")
+          with check.assertRaises(TypeError):
+              replace(cli_feature, scope="not-supported")
+          for value in (
+              cli_action.artifact, cli_action.context, cli_action, post, api_action,
+              cli_feature.parser, cli_feature, cli_profile.metadata,
+              cli_profile.connection, cli_profile.fingerprint, cli_profile,
+          ):
+              with check.assertRaises(TypeError):
+                  hash(value)
+          with check.assertRaises(FrozenInstanceError):
+              api_profile.version = "2.0.0"
+          with check.assertRaises(TypeError):
+              post.body["items"] = ()
+          with check.assertRaises(NipStackCoreUsageError):
+              HTTPRequestDefinition(path="/api/status", body={})
+          with check.assertRaises(NipStackCoreUsageError):
+              HTTPRequestDefinition(path="/api/status", method="DELETE")
+          with check.assertRaises(NipStackCoreUsageError):
+              HTTPRequestDefinition(path="/api/status", headers={"Authorization": "synthetic"})
+          with check.assertRaises(NipStackCoreUsageError):
+              replace(api_profile, actions=cli_profile.actions)
           print("Installed nipstack-core version:", version("nipstack-core"))
           PY
