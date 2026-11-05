@@ -8,6 +8,7 @@ from importlib import import_module, resources
 from importlib.metadata import version
 from pathlib import Path
 from pkgutil import walk_packages
+from tempfile import TemporaryDirectory
 from types import ModuleType
 
 
@@ -40,6 +41,7 @@ def smoke_installed(expected_version: str) -> None:
         CLIActionDefinition,
         HTTPRequestDefinition,
     )
+    from nipstack_core.profiles.loader import load_profile
 
     environment = Path(sys.prefix)
     assert_installed_location(nipstack_core, environment)
@@ -95,6 +97,34 @@ def smoke_installed(expected_version: str) -> None:
         artifact=ArtifactDefinition(kind="command_output"),
     )
     HTTPRequestDefinition(path="/api/status", query=[("item", "first"), ("item", "second")])
+    with TemporaryDirectory(prefix="nipstack-installed-profile-") as directory:
+        root = Path(directory).resolve()
+        (root / "parser.data").write_bytes(b"opaque parser")
+        (root / "schema.data").write_bytes(b"opaque schema")
+        (root / "profile.yaml").write_text(
+            """spec_version: 1
+id: example.installed
+version: "1.0.0"
+metadata: {name: Installed smoke, vendor: example, platform_id: example, access_variant: cli}
+connection: {connector: ssh}
+actions:
+  show_version:
+    type: cli
+    command: show version
+    artifact: {kind: command_output}
+features:
+  check.global.show_version:
+    inputs: [show_version]
+    parser: {engine: native, template: parser.data}
+    schema: schema.data
+""",
+            encoding="utf-8",
+        )
+        loaded = load_profile(root)
+        assert loaded.resources == {
+            "parser.data": b"opaque parser",
+            "schema.data": b"opaque schema",
+        }
     print(f"Installed nipstack-core {expected_version} smoke passed")
 
 

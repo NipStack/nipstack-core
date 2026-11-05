@@ -1,9 +1,13 @@
-# Internal declarative Profile models
+# Internal Profile models and secure loading
 
 30A provides typed in-memory definitions in `nipstack_core.profiles`. They are
 **internal preparatory data**, not a stable public API, a YAML loader, a
 validated Registry or active Profiles. The approved contract is recorded in
 [Issue #16](https://github.com/NipStack/nipstack-core/issues/16).
+
+30B adds the internal Linux loader described below, under
+[Issue #22](https://github.com/NipStack/nipstack-core/issues/22). A loaded Profile
+is still neither fully validated nor active.
 
 The 33 root/contracts public exports and the contracts described in
 [20-public-contracts.md](20-public-contracts.md) are unchanged. Features have no
@@ -281,3 +285,266 @@ Registry; 30D with 50 owns actual resource/compiler/schema/capability and
 activation gates. Parsers/Connectors/runtime workstreams own their execution
 behavior. No `validated`, active flag, loader, Registry, client, resolver,
 parser execution, fingerprint matcher or `collect()` is provided in 30A.
+
+## Secure loading of one explicit directory (30B)
+
+Import from the internal loader submodule; neither the root/contract exports nor
+the existing `profiles.__all__` surface is extended:
+
+```python
+from pathlib import Path
+
+from nipstack_core.profiles.loader import LoadLimits, load_profile
+
+loaded = load_profile(
+    Path("/explicit/local/profile"),
+    limits=LoadLimits(max_total_bytes=16_777_216),
+)
+definition = loaded.definition
+resources = loaded.resources  # Read-only relative-path -> immutable bytes.
+```
+
+`load_profile(root: Path, *, limits: LoadLimits = LoadLimits()) -> LoadedProfile`
+requires an absolute directory without symlink components, including its
+parents. It reads only `profile.yaml` and the explicitly referenced parser/schema
+files; there is no directory scan, discovery, HOME/environment expansion,
+include, inheritance, cache, source lifecycle or implicit reread.
+
+The loader constructs the real 30A models, checks Feature inputs and fingerprint
+Action existence, and acquires confined byte snapshots. Shared Actions are
+allowed. Each distinct relative resource reference is acquired once. Definition
+maps and sequences retain their existing ordering rules; resource order follows
+first reference appearance.
+
+`LoadedProfile` is frozen, slotted, keyword-only and unhashable. It owns its
+read-only resource mapping and hides definitions/resources in its representation.
+Contents remain stable if source files change after return. It is not a
+certificate: direct construction of this internal value does not run the loader.
+
+### Manifest grammar
+
+At each closed mapping level, every unknown key fails. IDs come from their map
+keys, not repeated nested fields. The complete mapping is:
+
+| Level | Required keys | Optional keys/defaults |
+| --- | --- | --- |
+| Root | `spec_version`, `id`, `version`, `metadata`, `connection`, `actions`, `features` | `identification=null` |
+| Metadata | `name`, `vendor`, `platform_id`, `access_variant` | None |
+| Connection | `connector` | `driver=null`, `authentication=null`, `session_setup=[]`, `connect_timeout=null`, `operation_timeout=null` |
+| CLI Action | `type: cli`, `command`, `artifact` | `context=null`, `operation_timeout=null` |
+| CLI context | None | `enter=[]`, `exit=[]` |
+| HTTP Action | `type: http`, `request`, `artifact` | `operation_timeout=null` |
+| Artifact | `kind` | `expose_by_default=false` |
+| HTTP request | `path` | `method=GET`, `query=null`, `headers=null`, `body=null` |
+| Feature | `inputs`, `parser`, `schema` | None |
+| Parser | `engine`, `template` | None |
+| Identification | `action`, `match` | None |
+| Identification match | `include` | `exclude=[]` |
+
+`id` maps to `profile_id`; Action/Feature map keys become their contained IDs.
+`type` selects the Action class and is not passed as a constructor argument.
+`identification.action` and `match.include/exclude` map to the existing
+`FingerprintDefinition`. No alternate Python-field-name aliases exist.
+
+`spec_version` is mandatory integer `1`, not bool or float. Actions and Features
+are mandatory mappings but may be empty: loading is not activation. Inputs and
+fingerprint includes remain nonempty according to 30A. Unknown fields, including
+legacy Feature `scope`, are rejected, not ignored.
+
+Absent optional fields use exactly the defaults above. Explicit `null` is
+permitted only for identification, driver/authentication selectors, timeouts,
+CLI context, query, headers and body. It is forbidden for method, exposure bool
+and all command/criterion sequences. Query/header `None` is passed to the 30A
+constructor, which already normalizes it to an immutable empty collection.
+There is no loader fallback from `null` to `[]`, `{}`, `false` or another default.
+`context: {}` constructs an empty context, distinct from `context: null`.
+
+Query is an ordered YAML sequence of two-string sequences:
+
+```yaml
+query:
+  - ["item", "a/b"]
+  - ["item", "c+d"]
+  - ["empty", ""]
+  - ["filter", "a b&é"]
+  - ["literal", "%2F"]
+```
+
+Each pair is explicitly adapted to a Python tuple. No value coercion,
+deduplication, trimming or URL encoding occurs. Numeric query values require
+quotes. HTTP method/body/path/header rules remain exactly those of 30A.
+Arbitrary JSON body properties are data, not additional manifest fields.
+
+### Synthetic CLI and HTTP manifests
+
+The following declares no proven driver, parser language or valid Schema:
+
+```yaml
+spec_version: 1
+id: example.switch.cli
+version: "1.0.0"
+metadata:
+  name: Example Switch CLI
+  vendor: example
+  platform_id: example.switch
+  access_variant: cli
+connection:
+  connector: ssh
+  driver: example_cli
+actions:
+  show_version:
+    type: cli
+    command: show version
+    artifact: {kind: command_output}
+features:
+  check.global.show_version:
+    inputs: [show_version]
+    parser: {engine: native, template: features/version/parser.data}
+    schema: features/version/schema.data
+identification:
+  action: show_version
+  match:
+    include: [ExampleOS]
+```
+
+Both resource paths must identify readable regular files under the root:
+
+```yaml
+spec_version: 1
+id: example.switch.api
+version: "1.0.0"
+metadata:
+  name: Example Switch API
+  vendor: example
+  platform_id: example.switch
+  access_variant: api
+connection:
+  connector: http
+  authentication: basic
+actions:
+  read_status:
+    type: http
+    request:
+      path: /api/status
+      query: [["item", "first"], ["item", "second"]]
+      headers: {Accept: application/vendor+json}
+    artifact: {kind: api_response}
+  query_details:
+    type: http
+    request:
+      method: POST
+      path: /api/query
+      body: {operation: read_details, filters: [{enabled: true}]}
+    artifact: {kind: api_response}
+features:
+  check.global.status:
+    inputs: [read_status, query_details]
+    parser: {engine: jmespath, template: features/status/parser.data}
+    schema: features/status/schema.data
+```
+
+### Restricted YAML decoding
+
+PyYAML parses syntax once through its Python `BaseLoader` event API. A small
+subclass rejects directive tokens before PyYAML can silently discard unknown
+directive names. No YAML constructors, resolver callbacks or executable objects
+are used. The loader only assembles mappings, lists and allowed scalars.
+
+- UTF-8 only; one initial UTF-8 BOM is accepted and counted. UTF-16/32 and
+  malformed Unicode fail. Exactly one nonempty mapping document is required.
+- Anchors (even unused), aliases, explicit tags (including standard tags),
+  all directives (known or unknown), complex/non-string keys and duplicate keys fail.
+- Plain `<<` mapping keys fail; quoted `"<<"` may be ordinary JSON body data.
+- Quoted/block scalars stay strings after YAML escape/folding processing.
+- Plain lowercase `null`, `true`, `false` become None/bools. Empty implicit
+  values such as `driver:` fail; write `null` explicitly.
+- Integers and floats use JSON decimal spelling; floats must be finite.
+  `.nan`/`.inf` spellings are rejected unless quoted.
+- Other plain values remain strings: `yes`, `on`, `True`, dates, `012`, `0x10`
+  and `1_000` are not YAML 1.1 conversions. Field types are checked afterwards.
+
+This is a restricted Profile format, not a claim to implement all YAML 1.1/1.2
+scalar semantics. Duplicate detection uses decoded strings, including keys
+whose escape spellings differ.
+
+### Per-load resource budgets
+
+`LoadLimits` is frozen, slotted and keyword-only. All eleven fields require
+strictly positive Python integers, excluding bool; no coercion or "unlimited"
+sentinel exists. Only the Python caller configures them, never the manifest.
+
+| Field | Default | Accounting |
+| --- | ---: | --- |
+| `max_manifest_bytes` | 1,048,576 | Raw manifest bytes, BOM/comments included |
+| `max_resource_bytes` | 2,097,152 | Raw bytes of each referenced resource |
+| `max_total_bytes` | 16,777,216 | Manifest plus distinct resource bytes |
+| `max_yaml_depth` | 80 | Containers on a manifest path, root included |
+| `max_yaml_nodes` | 100,000 | Mapping/sequence/scalar events, keys included |
+| `max_scalar_bytes` | 65,536 | UTF-8 bytes of each decoded scalar/key |
+| `max_actions` | 256 | Entries before constructing Action models |
+| `max_features` | 1,024 | Entries before constructing Feature models |
+| `max_resource_files` | 2,048 | Distinct declared parser/schema paths |
+| `max_path_components` | 32 | Relative path segments, leaf included |
+| `max_integer_digits` | 512 | Decimal integer digits, sign excluded |
+
+Overlapping ceilings apply independently; the total may be configured below an
+individual file ceiling. Limits need not be simultaneously attainable.
+Reference repetitions reuse snapshots; different paths are counted separately
+even if they identify one inode. If `profile.yaml` is referenced as a resource,
+its bytes are reused and counted only once, while its resource ceiling applies.
+
+File sizes are checked before reading, then every read is bounded by the
+remaining individual/total allowance plus at most one overrun-detection byte.
+No truncation, automatic retry or partial success is returned.
+
+Node/depth limits precede insertion into the decoded tree. PyYAML has already
+materialized a scalar before its scalar budget can be checked; the manifest
+byte ceiling still bounds input. Action/Feature limits precede model
+construction, not allocation of the already bounded decoded YAML mappings.
+These are not process RSS or CPU deadlines. Values are provisional, not
+empirically optimized, and are separate from future RuntimeLimits.
+
+The body JSON limit remains 64 containers, independent of manifest wrappers;
+64 body levels plus four envelope containers fit within YAML depth 80.
+The integer budget is checked before conversion and also respects CPython's
+active integer-conversion guard, without changing or bypassing global settings.
+Raising a caller budget does not remove that interpreter constraint.
+
+### Linux filesystem checks and residual limits
+
+Unsupported platforms/primitives fail before opening files; there is no weaker
+portable fallback. Directory components, including root parents, are opened
+relative to pinned descriptors with `O_DIRECTORY`, `O_NOFOLLOW` and `O_CLOEXEC`.
+Leaf metadata is checked without following links, then the opened descriptor is
+verified as regular. `O_NONBLOCK` avoids waiting on a substituted FIFO. Missing,
+unreadable, linked and non-regular resources fail explicitly. All descriptors
+close on success or error.
+
+File device/inode, mode, size, mtime and ctime are compared before opening,
+before reading and after reading. Size/content-length mismatches and observable
+changes fail. This is not a multi-file atomic snapshot or an integrity proof.
+Hard links, bind mounts, hostile subtree renames and all concurrent writes are
+not sandboxed. A device substitution may briefly open a device before the
+post-open regular-file check; nonblocking flags do not make devices harmless.
+Regular-file I/O can still block on an unhealthy filesystem. Use a controlled
+local tree during acquisition. Returned snapshots need no filesystem trust
+after return, but can themselves contain sensitive data.
+
+### Failures and remaining gates
+
+`ProfileLoadError` derives from `NipStackCoreUsageError` and exposes internal
+technical `code`, optional controlled `field`, and optional one-based YAML
+`line`/`column`. Its fixed messages/repr do not echo YAML, IDs, paths, commands,
+headers, body or resource contents. Original parser/OS messages are not emitted.
+No raw data is logged. The first failure follows deterministic pipeline order;
+this is not 30C issue aggregation or necessarily the earliest textual defect.
+
+Codes are `INVALID_ARGUMENT`, `UNSUPPORTED_PLATFORM`, `IO_ERROR`,
+`INVALID_ENCODING`, `INVALID_YAML`, `INVALID_MANIFEST`, `INVALID_REFERENCE`,
+`UNSAFE_PATH`, `RESOURCE_LIMIT`, `RESOURCE_CHANGED`. No public enum was changed.
+
+Resources remain opaque bytes, even if empty, non-UTF-8 or invalid as parsers or
+Schemas. No extension convention, parser/input capability check, template
+compilation, Draft 2020-12 validation, regex/fingerprint execution or
+SchemaIdentity calculation is performed. 30C and 30D/50 retain their gates.
+Loaded Profiles must never be treated as operational.
