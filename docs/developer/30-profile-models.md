@@ -548,3 +548,148 @@ Schemas. No extension convention, parser/input capability check, template
 compilation, Draft 2020-12 validation, regex/fingerprint execution or
 SchemaIdentity calculation is performed. 30C and 30D/50 retain their gates.
 Loaded Profiles must never be treated as operational.
+
+## Preparatory Profile sets (30C)
+
+`profiles.registry.PreparedProfileSet` is an internal constructor-builder, not
+the active `ProfileRegistry` required by Catalog and collection. Neither
+preparation, a `PREPARED` lookup nor an empty issue list certifies a fully
+validated or operational Profile. The existing 33 root/contracts exports and
+the `profiles` package exports are unchanged.
+
+```python
+from nipstack_core.profiles.registry import PreparedProfileSet
+
+# loaded was obtained explicitly, for example through load_profile().
+prepared = PreparedProfileSet(candidates=[loaded])
+lookup = prepared.lookup(loaded.definition.profile_id)
+assert lookup.status == "PREPARED"
+assert lookup.profile is loaded
+assert prepared.deferred_checks  # Unimplemented families, not successful checks.
+```
+
+### Input boundary and pure structural checks
+
+The constructor signature is:
+
+```python
+PreparationInput = LoadedProfile | ProfileLoadError
+
+PreparedProfileSet(
+    *, candidates: list[PreparationInput] | tuple[PreparationInput, ...]
+)
+```
+
+Only native `list` and `tuple` containers are accepted, including empty ones.
+The constructor copies the sequence before preparation; it rejects subclasses,
+custom sequences, mappings, sets, iterators and generators without consuming
+them. Annotate mutable input variables as `list[PreparationInput]`; Python
+list invariance otherwise prevents passing a variable typed `list[LoadedProfile]`
+to this precise annotation. Passing a tuple also preserves covariant typing.
+
+An unsupported outer container raises a sanitized `NipStackCoreUsageError`.
+Out-of-signature calls raise native `TypeError`. An invalid element inside an
+accepted container instead produces an isolated `INVALID_CANDIDATE` issue;
+independent candidates continue. Unexpected implementation errors, resource
+exhaustion and interruptions propagate rather than producing a partial result.
+
+Preparation reuses the 30A identity checks and the Action-reference helper
+shared with 30B. It checks Feature inputs, the optional identification Action,
+and presence of every referenced parser/template and schema snapshot.
+Action-reference failures precede missing-resource failures; the first expected
+structural failure per candidate is sufficient. No models are reconstructed to
+duplicate their local validation. Empty Action/Feature maps are still allowed.
+
+Direct Python construction of `LoadedProfile` is supported, but is **not proof
+of secure-loader provenance**. Its constructor supplies immutable typed storage,
+not cross-reference completeness. 30C does not open files, resolve paths,
+reload resources, parse YAML or execute network/command operations. Existing
+immutable loaded objects and opaque byte snapshots are reused; extra resource
+entries are preserved. Empty or semantically invalid resource bytes do not
+constitute structural failures.
+
+### Deterministic identity conflicts and lookup
+
+Every occurrence with an established canonical Profile identity participates
+in grouping by **Profile ID alone**, before admission. Repeating the same
+object, an equal copy, another version or different resource bytes conflicts.
+Every candidate in a duplicate group is excluded: no first/last winner, source
+priority, version ordering or fallback exists.
+
+An identifiable candidate with dangling references or missing resources still
+conflicts with a valid candidate declaring the same ID. Its local issue is
+retained alongside one `DUPLICATE_PROFILE_ID` issue for the group. Raw ID claims
+on unsupported objects and opaque load failures establish no identity and
+cannot poison a valid candidate.
+
+`prepared.profiles` is an owned read-only mapping from exact IDs to admitted
+`LoadedProfile` values, iterated in lexical ID order. `prepared.issues` is an
+immutable tuple: local issues in input order first, then conflict groups in
+first-occurrence order. Candidate indices are zero-based input positions;
+conflict indices are increasing. Permuting inputs cannot change admission or
+conflict membership, but necessarily changes diagnostic indices.
+
+`lookup(profile_id: str) -> PreparationLookup` preserves exact text. It reuses
+the public identity text validator: invalid types, empty text, peripheral
+whitespace and control/surrogate characters are usage errors. Other legal
+opaque text need not follow canonical Profile syntax; it simply cannot match
+unless that exact identity was established. No trimming or case-folding occurs.
+
+| Status | `profile` | `issues` |
+| --- | --- | --- |
+| `PREPARED` | One structurally prepared `LoadedProfile` | Empty |
+| `INVALID` | `None` | Local issues for the established rejected ID |
+| `CONFLICT` | `None` | Group conflict and any local issues for that ID |
+| `UNKNOWN` | `None` | Empty |
+
+Unidentified failures remain in the set-wide issues, not in an invented lookup
+entry. `UNKNOWN` means only that this explicit input set established no such
+identity; it is not a global search or public operational error. Lookup values
+enforce their payload combinations, but are not activation certificates.
+
+### Sanitized issues and immutable results
+
+`profiles.validation.PreparationIssue` contains a closed `code`, immutable
+`candidate_indices`, an optional canonical `profile_id` hidden from repr, and
+an optional closed `load_code`. Its `message` is fixed by code. Issue codes are
+`INVALID_CANDIDATE`, `LOAD_FAILED`, `INVALID_REFERENCE`, `RESOURCE_MISSING` and
+`DUPLICATE_PROFILE_ID`.
+
+Injected `ProfileLoadError` instances can be modified. Projection reads only
+their code: a native string recognized by 30B yields `LOAD_FAILED` with that
+closed code. Unknown, missing, wrongly typed and string-subclass codes yield
+`INVALID_CANDIDATE`. It never renders or retains the exception, unknown code,
+arguments, free fields, cause, context or traceback, and never infers an ID
+from caller-added attributes.
+
+Sets, lookups and issues are frozen, slotted and explicitly unhashable. The
+constructor-builder accepts no internal mappings, validation outcomes,
+caller-controlled deferred checks or active flags. Rebuild a new set instead
+of mutating one; there is no reload, activation or promotion method.
+
+These are ordinary Python integrity boundaries, not a sandbox against
+arbitrary Python code, reflection or deliberately corrupted model internals.
+Explicit data access and memory inspection can reveal Profile contents; safe
+repr/messages are not a general redaction layer. There is no aggregate
+preparation resource limit: callers must bound the number and total size of
+independently loaded candidates.
+
+### Deferred families are not per-Profile applicability
+
+The read-only `prepared.deferred_checks` tuple is fixed on the set alone:
+
+- `CONNECTOR_CAPABILITIES`
+- `PARSER_TEMPLATE_VALIDATION`
+- `PARSER_INPUT_COMPATIBILITY`
+- `FINGERPRINT_SEMANTICS`
+- `OBSERVATION_SCHEMA_VALIDATION`
+- `SCHEMA_IDENTITY`
+- `ACTIVATION_GATE`
+
+These name families not implemented by 30C, regardless of the set's contents.
+They do not assert which checks apply to any individual candidate, especially
+an invalid, conflicting or unknown Profile. Lookups have no `deferred_checks`.
+30D/50 must determine actual applicability and complete the appropriate gates
+using their own approved types and contracts. 30C supplies no registration,
+capability hook, fake success or bypass for those gates, and no Catalog,
+Profile source framework, planner, connector or collection API.

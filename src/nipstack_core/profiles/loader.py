@@ -20,6 +20,7 @@ from .actions import (
 )
 from .features import FeatureDefinition, ParserDefinition
 from .profile import ConnectionDefinition, FingerprintDefinition, ProfileDefinition, ProfileMetadata
+from .validation import _check_action_references
 
 __all__ = ["LoadedProfile", "LoadLimits", "ProfileLoadError", "load_profile"]
 
@@ -263,17 +264,6 @@ def _construct_profile(
         },
         fingerprint=_fingerprint(data.get("identification")),
     )
-
-
-def _check_action_references(definition: ProfileDefinition) -> None:
-    for index, feature in enumerate(definition.features.values()):
-        if any(action not in definition.actions for action in feature.inputs):
-            raise ProfileLoadError("INVALID_REFERENCE", field=f"features[{index}].inputs")
-    if (
-        definition.fingerprint is not None
-        and definition.fingerprint.action_id not in definition.actions
-    ):
-        raise ProfileLoadError("INVALID_REFERENCE", field="identification.action")
 
 
 def load_profile(root: Path, *, limits: LoadLimits = _DEFAULT_LIMITS) -> LoadedProfile:

@@ -42,6 +42,7 @@ def smoke_installed(expected_version: str) -> None:
         HTTPRequestDefinition,
     )
     from nipstack_core.profiles.loader import load_profile
+    from nipstack_core.profiles.registry import PreparedProfileSet
 
     environment = Path(sys.prefix)
     assert_installed_location(nipstack_core, environment)
@@ -125,6 +126,12 @@ features:
             "parser.data": b"opaque parser",
             "schema.data": b"opaque schema",
         }
+    prepared = PreparedProfileSet(candidates=[loaded])
+    assert prepared.issues == ()
+    assert prepared.lookup("example.installed").profile is loaded
+    assert prepared.lookup("example.installed").status == "PREPARED"
+    assert prepared.lookup("example.unknown").status == "UNKNOWN"
+    assert "ACTIVATION_GATE" in prepared.deferred_checks
     print(f"Installed nipstack-core {expected_version} smoke passed")
 
 
