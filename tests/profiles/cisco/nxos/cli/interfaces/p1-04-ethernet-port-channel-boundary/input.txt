@@ -1,0 +1,8 @@
+interface Ethernet1/1
+  description LAB_A
+interface port-channel10
+  description LAB_B
+  switchport
+  switchport mode trunk
+interface Ethernet1/2
+  description LAB_C

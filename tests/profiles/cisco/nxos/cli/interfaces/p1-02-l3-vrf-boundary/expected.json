@@ -1,0 +1,11 @@
+[
+  {
+    "interface": "Ethernet1/7",
+    "description": "LAB_TRANSIT",
+    "vrf": "LAB_RED",
+    "ipv4_address": "192.0.2.1/31"
+  },
+  {
+    "interface": "Ethernet1/8"
+  }
+]

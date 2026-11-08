@@ -1,0 +1,5 @@
+Software
+  BIOS: version 08.10
+  NXOS: version 10.2(1) [build LAB]
+Hardware
+  cisco Nexus9000 synthetic platform

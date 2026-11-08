@@ -1,0 +1,6 @@
+Software
+  BIOS:      version 08.07
+  kickstart: version 7.3(1)D1(1)
+  system:    version 7.3(2)D1(1)
+Hardware
+  cisco Nexus7000 synthetic platform
