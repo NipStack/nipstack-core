@@ -1,0 +1,16 @@
+interface port-channel10
+  description LAB_UPLINK_BUNDLE
+  switchport
+  switchport mode trunk
+  switchport trunk allowed vlan 110,120
+interface Ethernet1/3
+  description LAB_MEMBER_A
+  switchport
+  switchport mode trunk
+  channel-group 10 mode active
+  no shutdown
+interface Ethernet1/4
+  switchport
+  switchport mode trunk
+  channel-group 10 mode active
+  no shutdown

@@ -1,0 +1,15 @@
+[
+  {
+    "interface": "Ethernet1/1",
+    "description": "LAB_ACCESS",
+    "access_vlan": 110
+  },
+  {
+    "interface": "Ethernet1/2",
+    "switchport_mode": "trunk",
+    "trunk_vlans": [
+      110,
+      120
+    ]
+  }
+]

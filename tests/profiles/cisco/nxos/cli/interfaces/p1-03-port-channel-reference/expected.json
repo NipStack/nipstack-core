@@ -1,0 +1,24 @@
+[
+  {
+    "interface": "port-channel10",
+    "description": "LAB_UPLINK_BUNDLE",
+    "switchport_mode": "trunk",
+    "trunk_vlans": [
+      110,
+      120
+    ]
+  },
+  {
+    "interface": "Ethernet1/3",
+    "description": "LAB_MEMBER_A",
+    "switchport_mode": "trunk",
+    "channel_group": 10,
+    "channel_group_mode": "active"
+  },
+  {
+    "interface": "Ethernet1/4",
+    "switchport_mode": "trunk",
+    "channel_group": 10,
+    "channel_group_mode": "active"
+  }
+]
