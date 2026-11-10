@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0.3,<7",
+    "google-re2==1.1.20251105",
 ]
 
 [build-system]
@@ -17,6 +18,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/nipstack_core"]
 exclude = ["**/AGENTS.md"]
+
+[tool.uv]
+build-constraint-dependencies = ["setuptools==80.9.0", "wheel==0.45.1"]
 
 # The minimum supported runtime is Python 3.11 (local development uses 3.12).
 [tool.ruff]

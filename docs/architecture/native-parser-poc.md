@@ -2,6 +2,12 @@
 
 > **Status:** `A5_APPROVED` / `PUBLICATION_AUTHORIZED`. The owner authorizes publication of the 26 synthetic 40A files, including their inclusion in the sdist. No release, Profile activation or parser implementation is implied. Staging, commit, push and PR still require separate owner approval.
 
+This is the historical **40A protocol**, not the current engine specification.
+The experimental 40B implementation and its exact limits are documented in the
+[Native contributor guide](../developer/40-native-parser.md). Only P0-01,
+P0-02 and P1-04 are in its proof scope; no real NX-OS compatibility or benchmark
+claim follows.
+
 ## Purpose and architectural boundaries
 
 NipStack Native is the V1 declarative parser for CLI/text network data. The corpus tests **observable extraction behaviors**, not an NX-OS-specific parser and not the final organization of vendor Profiles. The other V1 parser engine is JMESPath for JSON/API data; no TTP parser, templates, runtime adapter or fallback is introduced.
@@ -64,6 +70,6 @@ These fixtures are **synthetic reconstructions**, not certified device-output ca
 
 ## Provenance, reuse and review
 
-Current files are authored synthetic demonstrations. Original private configurations and prior templates are not dependencies and must not be copied into public files. Do not publish sensitive values, source paths, internal names, customer identifiers, raw source snippets or unauthorized copyrighted material. The owner has approved publication of these 26 reviewed synthetic files, including their inclusion in the sdist; this approval does not cover real configurations, historical TTP templates or other private data. Actual NX-OS compatibility remains unverified, and no Native parser or benchmark result is available.
+Current files are authored synthetic demonstrations. Original private configurations and prior templates are not dependencies and must not be copied into public files. Do not publish sensitive values, source paths, internal names, customer identifiers, raw source snippets or unauthorized copyrighted material. The owner has approved publication of these 26 reviewed synthetic files, including their inclusion in the sdist; this approval does not cover real configurations, historical TTP templates or other private data. Actual NX-OS compatibility remains unverified. No parser or benchmark was delivered by 40A; the later 40B proof does not provide benchmark results.
 
 The experimental oracles and publication scope are approved. The final repository commit and 40B implementation still require explicit separate owner authorization. Nothing in this 40A specification confers permission to stage, commit, push, open a PR or activate a Profile.

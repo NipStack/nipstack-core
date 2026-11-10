@@ -36,6 +36,12 @@ uv sync --locked --python 3.12
 
 Do not add unnecessary runtime or development dependencies. When a new dependency is needed, explain its purpose, security/packaging impact, and obtain approval before changing the environment or lockfile.
 
+Native uses the official `google-re2` binding. Linux x86-64 Python 3.11/3.12
+use published wheels; Python 3.15 requires native compilation. See the
+[Native contributor guide](docs/developer/40-native-parser.md#re2-installation-and-python-315)
+for the private-prefix bootstrap, prerequisites and lifetime requirements.
+Do not install native packages globally or substitute a Python `re` fallback.
+
 ## Branches, commits, and Pull Requests
 
 Create a short-lived branch from current `main`:

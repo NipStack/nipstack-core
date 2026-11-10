@@ -1,0 +1,9 @@
+<doc>
+Experimental synthetic P0-01 projection, not an operational Profile.
+</doc>
+<template>
+@section
+Software
+  NXOS: version {{ version | required }} {{ ignore | regex="\[build LAB\]" | optional }}
+@end
+</template>
