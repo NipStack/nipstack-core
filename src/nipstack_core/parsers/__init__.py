@@ -1,1 +1,1 @@
-"""Parsers package boundary (implementation pending)."""
+"""Local parsers and engine-independent template resource extraction."""

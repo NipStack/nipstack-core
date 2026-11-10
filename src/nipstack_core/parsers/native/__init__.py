@@ -1,1 +1,1 @@
-"""Parsers Native package boundary (implementation pending)."""
+"""Experimental, internal Native compilation and offline parsing (40B)."""

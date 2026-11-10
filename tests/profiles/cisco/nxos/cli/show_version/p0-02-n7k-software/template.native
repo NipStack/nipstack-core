@@ -1,0 +1,9 @@
+<doc>
+Experimental synthetic P0-02 projection; no BIOS or kickstart fallback.
+</doc>
+<template>
+@section
+Software
+  system: version {{ version | required }}
+@end
+</template>

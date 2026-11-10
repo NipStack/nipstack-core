@@ -4,7 +4,15 @@
 
 These compact fixtures are synthetic, based on the categories of CLI syntax identified during authorized private research, **not verbatim excerpts** of live device configurations. All identifiers and addresses are invented (IP examples use documentation address ranges). They are **not evidence of compatibility with any particular NX-OS release**, nor proof that all simulated combinations occur on one device. No historical TTP templates are included.
 
-The owner has approved the A5 **design decisions, three corpus corrections and final technical review**, and authorized publication of these 26 synthetic files, including their inclusion in the NipStack Core sdist. This authorization does not cover real configurations, historical TTP templates or other private data. The `expected.json` files express independently authored, approved experimental oracles; they are not generated from a Native implementation (no Native implementation exists yet). Staging, commit, push and PR remain subject to a separate approval of the final local preparation.
+40B adds three experimental `template.native` resources alongside P0-01, P0-02
+and P1-04, separately from the original 26-file 40A inventory. These templates
+are test resources, not operational Profiles. See the
+[Native guide](../../../../../docs/developer/40-native-parser.md) and
+`tests/unit/test_native_runtime.py` for the implemented narrow proof. The
+original inputs and oracles are unchanged; historical case notes describe the
+40A design stage, not current engine coverage.
+
+The owner has approved the A5 **design decisions, three corpus corrections and final technical review**, and authorized publication of these 26 synthetic files, including their inclusion in the NipStack Core sdist. This authorization does not cover real configurations, historical TTP templates or other private data. The `expected.json` files express independently authored, approved experimental oracles; they are not generated from a Native implementation. Staging, commit, push and PR remain subject to a separate approval of the final local preparation.
 
 ## Inventory
 
@@ -51,5 +59,5 @@ The owner has approved the A5 **design decisions, three corpus corrections and f
 
 - No top-level P2-01 global route; no claim of global-route coverage.
 - No generic range VLAN handling (`1-10`, `all`, `add/remove`), no arbitrary permutations of route attributes, no multi-input or joins.
-- No comprehensive malformed/empty/large input suite, no CRLF/tab variants, no perf benchmarks and no parser implementation.
+- 40A delivered no parser, malformed/empty/large-input suite, CRLF/tab variants or performance benchmarks. 40B adds focused parser/negative/limit coverage only for its selected proof scope; performance benchmarks remain deferred.
 - End-of-file may close a complete block; EOF alone cannot certify that a transport did not truncate the source.

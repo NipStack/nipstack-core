@@ -41,7 +41,12 @@ jobs:
       - name: Install Python and locked dependencies
         run: |
           uv python install "$UV_PYTHON"
-          uv sync --locked --python "$UV_PYTHON"
+          if [ "$UV_PYTHON" = "3.15" ]; then
+            uv run --no-project --python "$UV_PYTHON" python tools/re2_source.py \
+              --prefix "$RUNNER_TEMP/nipstack-re2" -- uv sync --locked --python "$UV_PYTHON"
+          else
+            uv sync --locked --python "$UV_PYTHON"
+          fi
 
       - name: Ruff lint
         run: uv run --no-sync ruff check .

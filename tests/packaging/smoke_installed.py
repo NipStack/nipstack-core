@@ -36,6 +36,9 @@ def smoke_installed(expected_version: str) -> None:
         TargetDescriptor,
         contracts,
     )
+    from nipstack_core.parsers.native.compiler import compile_native
+    from nipstack_core.parsers.native.runtime import parse_native
+    from nipstack_core.parsers.template_resource import extract_template_body
     from nipstack_core.profiles import (
         ArtifactDefinition,
         CLIActionDefinition,
@@ -132,6 +135,15 @@ features:
     assert prepared.lookup("example.installed").status == "PREPARED"
     assert prepared.lookup("example.unknown").status == "UNKNOWN"
     assert "ACTIVATION_GATE" in prepared.deferred_checks
+    body = extract_template_body(
+        b'<template>\n@record\nitem {{ id | regex="[A-Z]+" }}\n'
+        b"  value {{ value | rest }}\n@end\n</template>\n",
+        max_bytes=1024,
+    )
+    compiled = compile_native(body)
+    assert parse_native(compiled, "item LAB\n  value synthetic\nitem 42\n") == (
+        {"id": "LAB", "value": "synthetic"},
+    )
     print(f"Installed nipstack-core {expected_version} smoke passed")
 
 
