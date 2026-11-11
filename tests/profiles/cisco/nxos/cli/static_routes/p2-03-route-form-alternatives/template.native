@@ -1,0 +1,14 @@
+<doc>
+Experimental hierarchical projection of the three evidenced route forms.
+The distinct hierarchical oracle is owner-approved; no arbitrary attribute permutations.
+</doc>
+<template>
+@record
+vrf context {{ vrf }}
+  @record routes
+  ip route {{ prefix | PREFIXV4 }} {{ interface | phrase | regex="Null0" }} name {{ name }}
+  ip route {{ prefix | PREFIXV4 }} {{ next_hop | IPV4 }} name {{ name }} tag {{ tag | INT | to_int }}
+  ip route {{ prefix | PREFIXV4 }} {{ interface }} {{ next_hop | IPV4 }} track {{ track | INT | to_int }} name {{ name }}
+  @end
+@end
+</template>

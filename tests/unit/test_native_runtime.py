@@ -149,7 +149,7 @@ def test_record_empty_single_header_only_and_repeated_identical_records():
 def test_record_nonempty_input_without_selected_headers_returns_empty_array(text):
     template = prepare(
         '@record\ninterface {{ interface | regex="Ethernet[0-9]+/[0-9]+" }}\n'
-        "  description {{ description | rest | required }}\n@end"
+        "  description {{ description | phrase | required }}\n@end"
     )
     result = parse_native(template, text)
     assert result == ()
@@ -157,7 +157,7 @@ def test_record_nonempty_input_without_selected_headers_returns_empty_array(text
 
 
 def test_foreign_boundary_resets_optional_fields():
-    template = prepare('@record\nitem {{ id | regex="A|B" }}\n  value {{ value | rest }}\n@end')
+    template = prepare('@record\nitem {{ id | regex="A|B" }}\n  value {{ value | phrase }}\n@end')
     assert plain(parse_native(template, "item A\nforeign\n  value bad\nitem B\n")) == [
         {"id": "A"},
         {"id": "B"},
@@ -200,10 +200,10 @@ def test_field_and_pattern_order_are_independent(line_order, pattern_order):
     ("modifier", "present", "missing", "valid_missing"),
     [
         ("", "value", "", False),
-        (" | rest", "many words  ", "", False),
+        (" | phrase", "many words  ", "", False),
         (' | regex="\\[build LAB\\]"', "[build LAB]", "", False),
         (" | optional", "value", "", True),
-        (" | rest | optional", "many words  ", "", True),
+        (" | phrase | optional", "many words  ", "", True),
         (' | regex="\\[build LAB\\]" | optional', "[build LAB]", "", True),
     ],
 )
@@ -227,7 +227,7 @@ def test_ignored_token_segments_and_slots():
     assert caught.value.code == "DUPLICATE_CAPTURE"
 
 
-@pytest.mark.parametrize("mode", ["rest", 'regex=".*"'])
+@pytest.mark.parametrize("mode", ["phrase", 'regex=".*"'])
 def test_absent_and_present_empty_are_distinct(mode):
     template = prepare(f"@section\nRoot\n  value {{{{ value | {mode} | optional }}}}\n@end")
     assert parse_native(template, "Root\n  value") == {}
@@ -264,7 +264,7 @@ def test_duplicate_named_scalar_across_patterns():
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_unicode_tabs_and_line_endings(newline):
-    template = prepare("@section\nRoot\n\tvalue {{ text | rest }}\n@end")
+    template = prepare("@section\nRoot\n\tvalue {{ text | phrase }}\n@end")
     text = newline.join(["Root", "\tvalue \u03a9 caf\u00e9  ", "End", ""])
     result = parse_native(template, text)
     assert result == {"text": "\u03a9 caf\u00e9  "}
@@ -316,7 +316,7 @@ def test_exact_utf8_input_and_output_thresholds():
 
 
 def test_ignored_values_still_consume_input_budget():
-    template = prepare("@section\nRoot\n  secret {{ ignore | rest }}\n@end", max_input_bytes=32)
+    template = prepare("@section\nRoot\n  secret {{ ignore | phrase }}\n@end", max_input_bytes=32)
     with pytest.raises(NativeError) as caught:
         parse_native(template, "Root\n  secret " + "x" * 100)
     assert caught.value.code == "RESOURCE_LIMIT"
@@ -363,7 +363,7 @@ def test_re2_safe_repetition_on_long_nonmatching_input():
 
 
 def test_exact_output_budget_includes_json_escaping_and_optional_empty():
-    body = "@section\nRoot\n  value {{ text | rest }}\n@end"
+    body = "@section\nRoot\n  value {{ text | phrase }}\n@end"
     value = 'quote" backslash\\ \u03a9\t'
     size = len(json.dumps({"text": value}, ensure_ascii=False, separators=(",", ":")).encode())
     assert parse_native(prepare(body, max_output_bytes=size), "Root\n  value " + value) == {

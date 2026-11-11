@@ -1,9 +1,27 @@
-"""Strict textual frontend; only deterministic 40B capture compositions compile."""
+"""Strict textual frontend with bounded, explicit block declarations."""
 
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ._regex import Regex, escape_literal
-from .model import Capture, CompiledNativeTemplate, LinePattern, NativeError, NativeLimits
+from .model import (
+    Capture,
+    CompiledBlock,
+    CompiledNativeTemplate,
+    LinePattern,
+    NativeError,
+    NativeLimits,
+    Transformation,
+    Validator,
+)
+
+_VALIDATORS: dict[str, Validator] = {
+    "IPV4": "IPV4",
+    "IPV6": "IPV6",
+    "PREFIXV4": "PREFIXV4",
+    "PREFIXV6": "PREFIXV6",
+    "INT": "INT",
+}
 
 _DEFAULT_LIMITS = NativeLimits()
 
@@ -49,26 +67,50 @@ def _split_modifiers(text: str) -> list[str]:
     return parts
 
 
+def _delimiter(text: str) -> str:
+    if len(text) < 2 or not text.startswith('"') or not text.endswith('"'):
+        raise NativeError("INVALID_TEMPLATE")
+    characters: list[str] = []
+    escaped = False
+    for character in text[1:-1]:
+        if escaped:
+            if character not in '\\"':
+                raise NativeError("INVALID_TEMPLATE")
+            characters.append(character)
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == '"' or ord(character) < 32:
+            raise NativeError("INVALID_TEMPLATE")
+        else:
+            characters.append(character)
+    if escaped or not characters:
+        raise NativeError("INVALID_TEMPLATE")
+    return "".join(characters)
+
+
+def _identifier(name: str) -> bool:
+    return name.isascii() and name.isidentifier()
+
+
 def _capture(text: str, limits: NativeLimits) -> Capture:
     name, *modifiers = _split_modifiers(text)
-    if (
-        not name
-        or name[0] not in "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        or any(
-            c not in "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" for c in name
-        )
-        or len(set(modifiers)) != len(modifiers)
-    ):
+    if not _identifier(name) or len(set(modifiers)) != len(modifiers):
         raise NativeError("INVALID_TEMPLATE")
-    mode: Literal["token", "rest", "regex"] = "token"
+    mode: Literal["token", "phrase"] = "token"
     constraint = None
+    validator: Validator | None = None
+    transformations: list[Transformation] = []
+    value_type: Literal["string", "integer", "strings", "integers"] = "string"
     for modifier in modifiers:
         if modifier in ("required", "optional"):
             continue
-        if modifier == "rest" and mode == "token":
-            mode = "rest"
-        elif modifier.startswith('regex="') and modifier.endswith('"') and mode == "token":
-            mode = "regex"
+        if modifier == "phrase" and mode == "token" and not transformations and validator is None:
+            mode = "phrase"
+        elif modifier.startswith('regex="') and modifier.endswith('"'):
+            if constraint is not None or validator is not None or transformations:
+                raise NativeError("INVALID_TEMPLATE")
+            mode = "phrase"
             expression = modifier[7:-1]
             escaped = False
             for character in expression:
@@ -78,11 +120,43 @@ def _capture(text: str, limits: NativeLimits) -> Capture:
             if len(expression.encode("utf-8")) > limits.max_regex_bytes:
                 raise NativeError("RESOURCE_LIMIT")
             constraint = _compile_regex(expression, limits)
+        elif modifier in _VALIDATORS:
+            if validator is not None or constraint is not None or transformations:
+                raise NativeError("INVALID_TEMPLATE")
+            validator = _VALIDATORS[modifier]
+        elif modifier == "to_int" and value_type == "string":
+            if validator is not None and validator != "INT":
+                raise NativeError("UNSUPPORTED_COMPOSITION")
+            transformations.append(Transformation("to_int"))
+            value_type = "integer"
+        elif modifier.startswith("split(") and modifier.endswith(")") and value_type == "string":
+            transformations.append(Transformation("split", _delimiter(modifier[6:-1])))
+            value_type = "strings"
+        elif (
+            modifier.startswith("expand_ranges(")
+            and modifier.endswith(")")
+            and value_type == "strings"
+        ):
+            delimiter = _delimiter(modifier[14:-1])
+            if any(character in "0123456789" for character in delimiter):
+                raise NativeError("INVALID_TEMPLATE")
+            transformations.append(Transformation("expand_ranges", delimiter))
+        elif modifier == "map_int" and value_type == "strings":
+            transformations.append(Transformation("map_int"))
+            value_type = "integers"
         else:
             raise NativeError("INVALID_TEMPLATE")
     if "required" in modifiers and "optional" in modifiers:
         raise NativeError("INVALID_TEMPLATE")
-    return Capture(name, mode, "optional" in modifiers, "required" in modifiers, constraint)
+    return Capture(
+        name,
+        mode,
+        "optional" in modifiers,
+        "required" in modifiers,
+        constraint,
+        validator,
+        tuple(transformations),
+    )
 
 
 def _parts(text: str, limits: NativeLimits) -> tuple[list[str], list[Capture]]:
@@ -121,13 +195,31 @@ def _parts(text: str, limits: NativeLimits) -> tuple[list[str], list[Capture]]:
 
 def _pattern(text: str, limits: NativeLimits) -> LinePattern:
     literals, captures = _parts(text, limits)
+    middle = [
+        index
+        for index, capture in enumerate(captures)
+        if capture.mode == "phrase" and (index < len(captures) - 1 or literals[-1])
+    ]
+    boundary = None
+    if middle:
+        index = middle[0]
+        if (
+            len(middle) != 1
+            or any(capture.optional for capture in captures)
+            or sum(capture.mode == "phrase" for capture in captures) != 1
+            or not literals[index + 1].strip(" \t")
+        ):
+            raise NativeError("UNSUPPORTED_COMPOSITION")
+        after = literals[index + 1]
+        marker = "[ \t]" + _literal(after.lstrip(" \t"))
+        boundary = (index, _compile_regex(marker, limits))
     structural: list[str] = []
     diagnostic: list[str] = []
     for index, capture in enumerate(captures):
         before, after = literals[index], literals[index + 1]
         final = index == len(captures) - 1 and not after
         if (
-            (capture.mode != "token" or capture.optional)
+            capture.optional
             and not final
             or (before and before[-1] not in " \t")
             or (after and after[0] not in " \t")
@@ -142,7 +234,9 @@ def _pattern(text: str, limits: NativeLimits) -> LinePattern:
             segment = separator
             # Missing captures may omit their separator, never extend a literal word.
             diagnostic.append(literal)
-            invalid_segment = r"[ \t]+[^\r\n]*" if final else r"[ \t]+[^ \t\r\n]+"
+            invalid_segment = (
+                r"[ \t]+[^\r\n]*" if final or capture.mode == "phrase" else r"[ \t]+[^ \t\r\n]+"
+            )
             diagnostic.append("(?:" + invalid_segment + ")?")
         else:
             segment = ""
@@ -158,7 +252,53 @@ def _pattern(text: str, limits: NativeLimits) -> LinePattern:
         _compile_regex("".join(structural), limits),
         _compile_regex("".join(diagnostic), limits),
         any(capture.required for capture in captures),
+        "".join(structural),
+        boundary,
     )
+
+
+@dataclass(slots=True)
+class _BlockBuilder:
+    kind: Literal["section", "record"]
+    name: str | None
+    header_indentation: str | None = None
+    indentation: str = ""
+    headers: list[LinePattern] = field(default_factory=list)
+    body: list[LinePattern] = field(default_factory=list)
+    children: list[CompiledBlock] = field(default_factory=list)
+
+    def member_indentation(self, prefix: str) -> None:
+        assert self.header_indentation is not None
+        if (
+            prefix == self.header_indentation
+            or not prefix.startswith(self.header_indentation)
+            or (self.indentation and prefix != self.indentation)
+        ):
+            raise NativeError("INVALID_TEMPLATE")
+        self.indentation = prefix
+
+    def finish(self) -> CompiledBlock:
+        if not self.headers:
+            raise NativeError("INVALID_TEMPLATE")
+        names = [child.name for child in self.children]
+        fields = {
+            capture.name
+            for pattern in (*self.headers, *self.body)
+            for capture in pattern.captures
+            if capture.name != "ignore"
+        }
+        if len(set(names)) != len(names) or any(name in fields for name in names):
+            raise NativeError("INVALID_TEMPLATE")
+        assert self.header_indentation is not None
+        return CompiledBlock(
+            self.kind,
+            self.name,
+            tuple(self.headers),
+            tuple(self.body),
+            self.header_indentation,
+            self.indentation,
+            tuple(self.children),
+        )
 
 
 def compile_native(
@@ -181,46 +321,84 @@ def compile_native(
         lines.pop()
     if len(lines) > limits.max_lines:
         raise NativeError("RESOURCE_LIMIT")
-    kind: Literal["section", "record"] | None = None
-    patterns: list[LinePattern] = []
-    indentation = ""
-    closed = False
+    stack: list[_BlockBuilder] = []
+    root: CompiledBlock | None = None
+    pattern_count = capture_count = 0
     for line in lines:
         line = line.removesuffix("\r")
         if len(line) > limits.max_line_characters:
             raise NativeError("RESOURCE_LIMIT")
         if not line.strip() or line.lstrip(" \t").startswith("#"):
             continue
-        if line.startswith("@"):
-            if line in ("@section", "@record") and kind is None and not closed:
-                kind = "section" if line == "@section" else "record"
-            elif line == "@end" and kind is not None and patterns and not closed:
-                closed = True
+        directive = line.lstrip(" \t")
+        if directive.startswith("@"):
+            words = directive.split(" ")
+            if words[0] in ("@section", "@record"):
+                kind: Literal["section", "record"] = (
+                    "section" if words[0] == "@section" else "record"
+                )
+                if not stack:
+                    if root is not None or len(words) != 1:
+                        raise NativeError("INVALID_TEMPLATE")
+                    stack.append(_BlockBuilder(kind, None))
+                else:
+                    if (
+                        len(stack) != 1
+                        or not stack[0].headers
+                        or len(words) != 2
+                        or not _identifier(words[1])
+                    ):
+                        raise NativeError("INVALID_TEMPLATE")
+                    stack.append(_BlockBuilder(kind, words[1]))
+            elif words == ["@end"] and stack:
+                finished = stack.pop().finish()
+                if stack:
+                    stack[-1].children.append(finished)
+                else:
+                    root = finished
             else:
                 raise NativeError("INVALID_TEMPLATE")
             continue
-        if kind is None or closed or line.endswith((" ", "\t")):
+        if not stack or line.endswith((" ", "\t")):
             raise NativeError("INVALID_TEMPLATE")
+        current = stack[-1]
         prefix = line[: len(line) - len(line.lstrip(" \t"))]
-        if not patterns:
-            if prefix:
+        header = not current.headers
+        if header:
+            if len(stack) == 1 and prefix:
                 raise NativeError("INVALID_TEMPLATE")
-        elif not prefix or (indentation and prefix != indentation):
-            raise NativeError("INVALID_TEMPLATE")
+            if len(stack) > 1:
+                stack[-2].member_indentation(prefix)
+            current.header_indentation = prefix
+        elif prefix == current.header_indentation:
+            if current.kind != "record" or current.name is None or current.body:
+                raise NativeError("INVALID_TEMPLATE")
+            header = True
         else:
-            indentation = prefix
-        pattern = _pattern(line[len(prefix) :], limits)
-        if not patterns and any(
-            capture.optional or capture.required for capture in pattern.captures
+            current.member_indentation(prefix)
+        if (
+            header
+            and current.name is not None
+            and current.kind == "record"
+            and line[len(prefix) :].startswith("|")
         ):
             raise NativeError("INVALID_TEMPLATE")
-        if patterns and not pattern.captures:
+        if pattern_count >= limits.max_patterns:
+            raise NativeError("RESOURCE_LIMIT")
+        pattern = _pattern(line[len(prefix) :], limits)
+        if header and any(capture.optional or capture.required for capture in pattern.captures):
             raise NativeError("INVALID_TEMPLATE")
-        patterns.append(pattern)
-        if len(patterns) > limits.max_patterns:
+        if not header and not pattern.captures:
+            raise NativeError("INVALID_TEMPLATE")
+        if header and any(
+            previous.structural_key == pattern.structural_key for previous in current.headers
+        ):
+            raise NativeError("INVALID_TEMPLATE")
+        (current.headers if header else current.body).append(pattern)
+        pattern_count += 1
+        capture_count += len(pattern.captures)
+        if capture_count > limits.max_captures:
             raise NativeError("RESOURCE_LIMIT")
-        if sum(len(p.captures) for p in patterns) > limits.max_captures:
-            raise NativeError("RESOURCE_LIMIT")
-    if kind is None or not closed:
+    if root is None or stack:
         raise NativeError("INVALID_TEMPLATE")
-    return CompiledNativeTemplate(kind, patterns[0], tuple(patterns[1:]), indentation, limits)
+    return CompiledNativeTemplate(root, limits)

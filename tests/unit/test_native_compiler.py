@@ -7,18 +7,18 @@ from nipstack_core.parsers.native.model import NativeError, NativeLimits
 
 
 def test_immutable_compilation():
-    compiled = compile_native(b"@record\nitem {{ id }}\n  value {{ text | rest }}\n@end\n")
-    assert compiled.kind == "record"
-    assert isinstance(compiled.body, tuple)
+    compiled = compile_native(b"@record\nitem {{ id }}\n  value {{ text | phrase }}\n@end\n")
+    assert compiled.root.kind == "record"
+    assert isinstance(compiled.root.body, tuple)
     with pytest.raises(FrozenInstanceError):
-        compiled.kind = "section"
+        compiled.root.kind = "section"
     with pytest.raises(FrozenInstanceError):
-        compiled.header.captures[0].optional = True
+        compiled.root.headers[0].captures[0].optional = True
 
 
 @pytest.mark.parametrize("kind", ["section", "record"])
 @pytest.mark.parametrize("name", ["interface", "ignore"])
-@pytest.mark.parametrize("capture_type", ["", " | rest", ' | regex="[A-Z]+"'])
+@pytest.mark.parametrize("capture_type", ["", " | phrase", ' | regex="[A-Z]+"'])
 @pytest.mark.parametrize("modifier", ["optional", "required"])
 def test_header_captures_reject_presence_modifiers(kind, name, capture_type, modifier):
     with pytest.raises(NativeError) as caught:
@@ -35,6 +35,9 @@ def test_header_captures_reject_presence_modifiers(kind, name, capture_type, mod
         "@section\n@end",
         "@section\nRoot",
         "@end",
+        "@section \nRoot\n@end",
+        "@section\nRoot\n@end ",
+        "@section\nRoot\n@end\t",
         "@group\nRoot\n@end",
         "@native 40b-1\n@section\nRoot\n@end",
         "@section\nRoot\n@record\nx\n@end\n@end",
@@ -64,7 +67,7 @@ def test_invalid_templates(body):
     [
         "{{ a }}{{ b }}",
         "{{ a }}-{{ b }}",
-        "{{ a | rest }} suffix",
+        "{{ a | phrase }} {{ b }}",
         '{{ a | regex=".*" }} {{ b }}',
         "{{ a | optional }} {{ b }}",
         "{{ a | optional }}",
@@ -133,8 +136,8 @@ def test_exact_compilation_thresholds_and_crlf():
         max_patterns=2,
         max_captures=1,
     )
-    assert compile_native(body, limits=limits).kind == "section"
-    assert compile_native(body.replace(b"\n", b"\r\n")).kind == "section"
+    assert compile_native(body, limits=limits).root.kind == "section"
+    assert compile_native(body.replace(b"\n", b"\r\n")).root.kind == "section"
 
 
 @pytest.mark.parametrize("memory", [1, 65_535, 2_147_483_648])
