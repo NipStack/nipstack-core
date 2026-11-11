@@ -4,13 +4,24 @@
 
 These compact fixtures are synthetic, based on the categories of CLI syntax identified during authorized private research, **not verbatim excerpts** of live device configurations. All identifiers and addresses are invented (IP examples use documentation address ranges). They are **not evidence of compatibility with any particular NX-OS release**, nor proof that all simulated combinations occur on one device. No historical TTP templates are included.
 
-40B adds three experimental `template.native` resources alongside P0-01, P0-02
-and P1-04, separately from the original 26-file 40A inventory. These templates
+40B added three experimental `template.native` resources alongside P0-01, P0-02
+and P1-04. 40C adds resources for P1-01, P1-02, P1-03, P2-02 and P2-03,
+separately from the original 26-file 40A inventory. These templates
 are test resources, not operational Profiles. See the
 [Native guide](../../../../../docs/developer/40-native-parser.md) and
-`tests/unit/test_native_runtime.py` for the implemented narrow proof. The
-original inputs and oracles are unchanged; historical case notes describe the
+the Native unit tests for the implemented narrow proof. The
+original inputs and oracles are unchanged except for the separately authorized
+removal of P2-02's historical flat oracle. Historical case notes describe the
 40A design stage, not current engine coverage.
+
+40C reproduces all P0/P1 historical oracles, including P1-03's explicit
+Port-Channel references without joins. P2 templates instead reproduce new
+`expected.hierarchical.json` **oracles approved by the owner**, grouping child
+route occurrences under each selected parent occurrence. P2-02 now retains only
+its approved `expected.hierarchical.json`; the owner explicitly authorized
+removal of its historical flat `expected.json`. P2-03's historical flat
+`expected.json`, all `input.txt` and all `case.md` files remain unchanged.
+Neither shape is inferred from the other or grouped by a captured VRF value.
 
 The owner has approved the A5 **design decisions, three corpus corrections and final technical review**, and authorized publication of these 26 synthetic files, including their inclusion in the NipStack Core sdist. This authorization does not cover real configurations, historical TTP templates or other private data. The `expected.json` files express independently authored, approved experimental oracles; they are not generated from a Native implementation. Staging, commit, push and PR remain subject to a separate approval of the final local preparation.
 
@@ -37,7 +48,9 @@ The owner has approved the A5 **design decisions, three corpus corrections and f
 - Typed captures are explicit: VLAN/group/tag/track numeric IDs are integers where present; comma-separated VLAN values are an ordered integer list. Versions, VRFs, descriptions, interface names, prefixes and addresses remain strings unless separately approved.
 - Do not infer interface operational state from `no shutdown`, or infer `switchport_mode=access` merely from an access-VLAN declaration.
 - Different interface types can use **independent future Profile Feature templates** on the same immutable acquisition. P1-03's mixed result is experimental; P1-04 demonstrates an Ethernet-only projection even when Port-Channel closes the active block.
-- P2 routes use a flat, ordered array with explicit VRF context; unrelated top-level sections end that context. Global routes are not covered.
+- The historical 40A P2 oracles use a flat, ordered array with explicit VRF
+  context. The separate 40C proposals follow declared parent/child hierarchy.
+  Unrelated top-level sections end either context. Global routes are not covered.
 - A malformed targeted line, duplicate singleton capture, or unsupported suffix must not be silently accepted; unrelated lines outside projection may be ignored when section boundaries remain correctly enforced.
 
 ## Experimental delivery boundaries
@@ -58,6 +71,8 @@ The owner has approved the A5 **design decisions, three corpus corrections and f
 ## Known experimental gaps
 
 - No top-level P2-01 global route; no claim of global-route coverage.
-- No generic range VLAN handling (`1-10`, `all`, `add/remove`), no arbitrary permutations of route attributes, no multi-input or joins.
+- Explicit `split`, `expand_ranges` and `map_int` support nonnegative decimal
+  ranges without VLAN-specific bounds. There is no `all`, `add/remove`, arbitrary
+  route-attribute permutation, multi-input or join handling.
 - 40A delivered no parser, malformed/empty/large-input suite, CRLF/tab variants or performance benchmarks. 40B adds focused parser/negative/limit coverage only for its selected proof scope; performance benchmarks remain deferred.
 - End-of-file may close a complete block; EOF alone cannot certify that a transport did not truncate the source.

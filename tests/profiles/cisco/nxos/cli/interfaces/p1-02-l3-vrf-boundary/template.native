@@ -1,0 +1,11 @@
+<doc>
+Experimental host-bearing prefix validation with adjacent header-only records.
+</doc>
+<template>
+@record
+interface {{ interface | regex="Ethernet[0-9]+/[0-9]+" }}
+  description {{ description | phrase }}
+  vrf member {{ vrf }}
+  ip address {{ ipv4_address | PREFIXV4 }}
+@end
+</template>

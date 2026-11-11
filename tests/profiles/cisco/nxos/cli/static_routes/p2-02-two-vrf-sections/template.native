@@ -1,0 +1,13 @@
+<doc>
+Experimental hierarchical projection. The distinct hierarchical oracle is owner-approved.
+Only route forms evidenced by this case are declared.
+</doc>
+<template>
+@record
+vrf context {{ vrf }}
+  @record routes
+  ip route {{ prefix | PREFIXV4 }} {{ next_hop | IPV4 }}
+  ip route {{ prefix | PREFIXV4 }} {{ next_hop | IPV4 }} name {{ name }}
+  @end
+@end
+</template>

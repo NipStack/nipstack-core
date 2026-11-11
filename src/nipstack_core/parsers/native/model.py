@@ -31,10 +31,10 @@ _MESSAGES: dict[NativeErrorCode, str] = {
     "INVALID_REGEX": "A Native regex is invalid, unsupported or exceeds its compilation budget.",
     "RESOURCE_LIMIT": "A Native parser resource limit was exceeded.",
     "MISSING_SECTION": "The required root section was not found.",
-    "DUPLICATE_SECTION": "The unique root section occurred more than once.",
+    "DUPLICATE_SECTION": "A unique section occurred more than once in its context.",
     "MISSING_REQUIRED": "A required field pattern did not occur.",
     "DUPLICATE_CAPTURE": "A scalar capture occurred more than once in a block.",
-    "AMBIGUOUS_MATCH": "More than one field pattern accepts the line.",
+    "AMBIGUOUS_MATCH": "The declared patterns or capture boundaries are ambiguous.",
     "MALFORMED_LINE": "A declared line structure contains invalid capture content.",
     "INVALID_INDENTATION": "A declared body line has invalid indentation.",
 }
@@ -62,6 +62,7 @@ class NativeLimits:
     max_regex_bytes: int = 4_096
     max_re2_memory: int = 524_288
     max_records: int = 10_000
+    max_transformed_items: int = 10_000
     max_output_bytes: int = 8_388_608
 
     def __post_init__(self) -> None:
@@ -74,12 +75,23 @@ class NativeLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class Transformation:
+    kind: Literal["to_int", "split", "expand_ranges", "map_int"]
+    delimiter: str | None = field(default=None, repr=False)
+
+
+Validator: TypeAlias = Literal["IPV4", "IPV6", "PREFIXV4", "PREFIXV6", "INT"]
+
+
+@dataclass(frozen=True, slots=True)
 class Capture:
     name: str = field(repr=False)
-    mode: Literal["token", "rest", "regex"]
+    mode: Literal["token", "phrase"]
     optional: bool
     required: bool
     constraint: Regex | None = field(repr=False)
+    validator: Validator | None = None
+    transformations: tuple[Transformation, ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,14 +100,24 @@ class LinePattern:
     structural: Regex = field(repr=False)
     diagnostic: Regex = field(repr=False)
     required: bool
+    structural_key: str = field(repr=False)
+    phrase_boundary: tuple[int, Regex] | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledBlock:
+    kind: Literal["section", "record"]
+    name: str | None = field(repr=False)
+    headers: tuple[LinePattern, ...] = field(repr=False)
+    body: tuple[LinePattern, ...] = field(repr=False)
+    header_indentation: str = field(repr=False)
+    indentation: str = field(repr=False)
+    children: tuple["CompiledBlock", ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True, slots=True)
 class CompiledNativeTemplate:
     """Internal prepared value; native handles and author text are not public contracts."""
 
-    kind: Literal["section", "record"]
-    header: LinePattern = field(repr=False)
-    body: tuple[LinePattern, ...] = field(repr=False)
-    indentation: str = field(repr=False)
+    root: CompiledBlock = field(repr=False)
     limits: NativeLimits

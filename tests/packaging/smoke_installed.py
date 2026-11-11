@@ -137,12 +137,20 @@ features:
     assert "ACTIVATION_GATE" in prepared.deferred_checks
     body = extract_template_body(
         b'<template>\n@record\nitem {{ id | regex="[A-Z]+" }}\n'
-        b"  value {{ value | rest }}\n@end\n</template>\n",
+        b"  value {{ value | phrase }}\n@end\n</template>\n",
         max_bytes=1024,
     )
     compiled = compile_native(body)
     assert parse_native(compiled, "item LAB\n  value synthetic\nitem 42\n") == (
         {"id": "LAB", "value": "synthetic"},
+    )
+    extended = compile_native(
+        b"@record\nparent {{ id }}\n  @record items\n"
+        b'  item {{ values | split(",") | expand_ranges("-") | map_int }}\n'
+        b"  address {{ address | PREFIXV4 }}\n  @end\n@end\n"
+    )
+    assert parse_native(extended, "parent LAB\n  item 1,3-4\n  address 192.0.2.1/31") == (
+        {"id": "LAB", "items": ({"values": (1, 3, 4)}, {"address": "192.0.2.1/31"})},
     )
     print(f"Installed nipstack-core {expected_version} smoke passed")
 

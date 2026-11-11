@@ -1,0 +1,12 @@
+<doc>
+Experimental mixed interface projection with explicit numeric membership references, not joins.
+</doc>
+<template>
+@record
+interface {{ interface }}
+  description {{ description | phrase }}
+  switchport mode {{ switchport_mode }}
+  switchport trunk allowed vlan {{ trunk_vlans | split(",") | expand_ranges("-") | map_int }}
+  channel-group {{ channel_group | INT | to_int }} mode {{ channel_group_mode }}
+@end
+</template>

@@ -8,9 +8,13 @@ from typing import Protocol, cast
 class _Match(Protocol):
     def groups(self) -> tuple[str | None, ...]: ...
 
+    def span(self, group: int = 0) -> tuple[int, int]: ...
+
 
 class _Pattern(Protocol):
     def fullmatch(self, text: str) -> _Match | None: ...
+
+    def search(self, text: str, pos: int = 0) -> _Match | None: ...
 
 
 class _Options(Protocol):
@@ -55,6 +59,15 @@ class Regex:
 
     def accepts(self, text: str) -> bool:
         return self._pattern.fullmatch(text) is not None
+
+    def capture_start(self, text: str, group: int) -> int:
+        matched = self._pattern.fullmatch(text)
+        assert matched is not None
+        return matched.span(group)[0]
+
+    def has_multiple_boundaries(self, text: str, start: int) -> bool:
+        first = self._pattern.search(text, start)
+        return first is not None and self._pattern.search(text, first.span()[0] + 1) is not None
 
 
 def escape_literal(text: str) -> str:

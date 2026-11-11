@@ -4,6 +4,6 @@ Experimental Ethernet projection; foreign top-level blocks still close records.
 <template>
 @record
 interface {{ interface | regex="Ethernet[0-9]+/[0-9]+" }}
-  description {{ description | rest }}
+  description {{ description | phrase }}
 @end
 </template>

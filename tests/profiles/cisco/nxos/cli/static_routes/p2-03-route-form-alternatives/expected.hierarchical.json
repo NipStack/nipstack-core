@@ -1,0 +1,25 @@
+[
+  {
+    "vrf": "LAB_EDGE",
+    "routes": [
+      {
+        "prefix": "203.0.113.0/24",
+        "interface": "Null0",
+        "name": "LAB_DISCARD"
+      },
+      {
+        "prefix": "198.51.100.0/24",
+        "next_hop": "192.0.2.2",
+        "name": "LAB_BACKUP",
+        "tag": 120
+      },
+      {
+        "prefix": "192.0.2.128/25",
+        "interface": "Ethernet1/9",
+        "next_hop": "198.51.100.2",
+        "track": 10,
+        "name": "LAB_TRACKED"
+      }
+    ]
+  }
+]
