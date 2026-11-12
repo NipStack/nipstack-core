@@ -61,12 +61,80 @@ def test_rss_distinguishes_post_exec_peak_from_inherited_launcher_high_water(mon
     assert rss() == {"rss_peak_bytes": 2097152, "rusage_maxrss_bytes": 67108864}
 
 
-def test_benchmark_cli_uses_distinct_cold_and_memory_workers(tmp_path):
+@pytest.fixture
+def shallow_checkout(tmp_path):
+    source = tmp_path / "source"
+    subprocess.run(
+        ["git", "init", "--initial-branch=main", str(source)], check=True, capture_output=True
+    )
+    script = source / "tools/benchmark_native.py"
+    script.parent.mkdir()
+    script.write_bytes(SCRIPT.read_bytes())
+    subprocess.run(["git", "add", "tools/benchmark_native.py"], cwd=source, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Synthetic baseline",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+    )
+    baseline = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    subprocess.run(["git", "branch", "qualification"], cwd=source, check=True)
+    checkout = tmp_path / "checkout"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--depth=1",
+            "--single-branch",
+            "--branch=qualification",
+            source.as_uri(),
+            str(checkout),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return checkout, baseline
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_benchmark_cli_uses_distinct_cold_and_memory_workers(tmp_path, shallow_checkout, detached):
+    checkout, baseline = shallow_checkout
+    assert (
+        subprocess.check_output(
+            ["git", "rev-parse", "--is-shallow-repository"], cwd=checkout, text=True
+        ).strip()
+        == "true"
+    )
+    assert (
+        subprocess.run(
+            ["git", "show-ref", "--verify", "refs/remotes/origin/main"],
+            cwd=checkout,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+    if detached:
+        subprocess.run(
+            ["git", "checkout", "--detach"], cwd=checkout, check=True, capture_output=True
+        )
     completed = subprocess.run(
         [
             sys.executable,
             "-P",
-            str(SCRIPT),
+            str(checkout / "tools/benchmark_native.py"),
+            "--base-main-sha",
+            baseline,
             "--case",
             "compile",
             "--samples",
@@ -81,10 +149,13 @@ def test_benchmark_cli_uses_distinct_cold_and_memory_workers(tmp_path):
         text=True,
         capture_output=True,
         cwd=tmp_path,
-        check=True,
         timeout=60,
     )
+    assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout)
+    assert report["source"]["base_main_sha"] == baseline
+    assert report["source"]["head_sha"] == baseline
+    assert report["source"]["branch"] == ("" if detached else "qualification")
     phases = report["cases"]["compile"]
     pids = []
     for phase in ("cold_compile", "python_memory", "rss"):
@@ -94,3 +165,21 @@ def test_benchmark_cli_uses_distinct_cold_and_memory_workers(tmp_path):
         pids.extend(worker["pid"] for worker in workers)
     assert len(set(pids)) == len(pids)
     assert len(phases["timing"]["workers"][0]["observations"]) == 2
+
+
+def test_missing_baseline_is_explicit_and_never_substituted_with_head(shallow_checkout):
+    checkout, baseline = shallow_checkout
+    with pytest.raises(RuntimeError, match="--base-main-sha"):
+        HELPERS["_source"](checkout)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", baseline], cwd=checkout, check=True
+    )
+    assert HELPERS["_source"](checkout)["base_main_sha"] == baseline
+
+
+def test_explicit_baseline_must_be_a_full_available_commit_sha(shallow_checkout):
+    checkout, _ = shallow_checkout
+    with pytest.raises(ValueError, match="complete commit SHA"):
+        HELPERS["_source"](checkout, base_main_sha="HEAD")
+    with pytest.raises(RuntimeError, match="--base-main-sha"):
+        HELPERS["_source"](checkout, base_main_sha="0" * 40)

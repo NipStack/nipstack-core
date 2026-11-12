@@ -413,6 +413,16 @@ reported as not exposed. Uncommitted source identity is the baseline/head SHA
 a new commit SHA. Keep reports outside the checkout so they do not change that
 patch. Review artifacts should retain the raw report and matching patch.
 
+By default the main baseline is inferred with `git merge-base HEAD origin/main`,
+which requires that reference and sufficient history. For a shallow or detached
+checkout, pass `--base-main-sha FULL_APPROVED_MAIN_SHA` explicitly. The supplied
+full SHA must resolve to a local commit; acquire that approved baseline before
+running if it is absent. This identifies the caller-approved main baseline,
+without claiming that shallow history proves ancestry. The script never
+substitutes `HEAD` for a missing baseline or fetches automatically; unresolved
+provenance fails explicitly. CLI smoke tests use isolated synthetic shallow
+repositories and do not depend on the CI checkout's remote refs.
+
 ### Qualification boundaries
 
 Use `PASS` only for demonstrated behavior or a completed valid measurement

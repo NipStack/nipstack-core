@@ -268,9 +268,29 @@ def _measure(name: str, phase: Phase, samples: int, warmups: int) -> dict[str, J
     }
 
 
-def _source(root: Path) -> dict[str, JSONValue]:
+def _source(root: Path, *, base_main_sha: str | None = None) -> dict[str, JSONValue]:
     def git(*arguments: str) -> bytes:
-        return subprocess.check_output(["git", "--no-pager", *arguments], cwd=root)
+        return subprocess.check_output(
+            ["git", "--no-pager", *arguments], cwd=root, stderr=subprocess.PIPE
+        )
+
+    if base_main_sha is not None and (
+        len(base_main_sha) != 40
+        or any(character not in "0123456789abcdefABCDEF" for character in base_main_sha)
+    ):
+        raise ValueError("--base-main-sha requires a complete commit SHA.")
+    try:
+        baseline = (
+            git("merge-base", "HEAD", "origin/main")
+            if base_main_sha is None
+            else git("rev-parse", "--verify", "--end-of-options", base_main_sha + "^{commit}")
+        )
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            "Cannot resolve the benchmark's main baseline. Provide origin/main history "
+            "or --base-main-sha with the full approved baseline commit available locally. "
+            "No baseline is substituted and no fetch is performed."
+        ) from error
 
     patch = git("diff", "--binary", "HEAD")
     for name in sorted(git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")):
@@ -295,7 +315,7 @@ def _source(root: Path) -> dict[str, JSONValue]:
         patch += completed.stdout
     return {
         "head_sha": git("rev-parse", "HEAD").decode().strip(),
-        "base_main_sha": git("merge-base", "HEAD", "origin/main").decode().strip(),
+        "base_main_sha": baseline.decode().strip(),
         "branch": git("branch", "--show-current").decode().strip(),
         "full_local_patch_sha256": hashlib.sha256(patch).hexdigest(),
         "status": git("status", "--short").decode(),
@@ -398,6 +418,10 @@ def main() -> None:
     parser.add_argument("--cold-samples", type=int, default=5)
     parser.add_argument("--memory-samples", type=int, default=3)
     parser.add_argument(
+        "--base-main-sha",
+        help="Full approved main baseline commit SHA, available locally; bypass origin/main inference.",
+    )
+    parser.add_argument(
         "--environment-note", default="Unspecified; do not assume dedicated resources."
     )
     parser.add_argument(
@@ -420,7 +444,7 @@ def main() -> None:
     if min(args.samples, args.cold_samples, args.memory_samples) < 2 or args.warmups < 0:
         parser.error("Use at least two samples per campaign and nonnegative warmups.")
     root = Path(__file__).resolve().parents[1]
-    source = _source(root)
+    source = _source(root, base_main_sha=args.base_main_sha)
     report: dict[str, JSONValue] = {
         "started_at": datetime.now(UTC).isoformat(),
         "command": [sys.executable, *sys.argv],
@@ -461,7 +485,7 @@ def main() -> None:
     report["cases"] = cases
     report["finished_at"] = datetime.now(UTC).isoformat()
     report["final_load_average"] = list(os.getloadavg())
-    if source != _source(root):
+    if source != _source(root, base_main_sha=args.base_main_sha):
         raise RuntimeError("Local sources changed during the campaign; discard these measurements.")
     print(json.dumps(report, indent=2, sort_keys=True))
 
