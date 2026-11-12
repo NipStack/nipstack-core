@@ -2,9 +2,9 @@
 
 Native proves the synthetic P0-01, P0-02 and all four P1 cases from
 [the corpus](../../tests/profiles/cisco/nxos/cli/README.md). It is not a certified
-NX-OS grammar, an operational Profile or a public collection API. No benchmark,
-real-device proof, JMESPath execution, schema validation or Profile activation
-is implied. P2-02 and P2-03 additionally reproduce distinct approved
+NX-OS grammar, an operational Profile or a public collection API. Offline
+qualification measurements do not imply real-device proof, JMESPath execution,
+schema validation or Profile activation. P2-02 and P2-03 reproduce distinct approved
 hierarchical oracles. The owner authorized removal of P2-02's historical
 flat oracle; P2-03's historical flat oracle remains unchanged.
 Internal parser APIs are not new root/contracts exports.
@@ -190,9 +190,12 @@ without changing interpreter settings.
 - `map_int`: string array to integer array, using the same strict conversion.
   It does not expand ranges. Empty or space-prefixed entries fail conversion.
 
-Delimiters use double quotes with only `\"` and `\\` escapes; control characters
-and empty delimiters are rejected. No regex splitting, evaluation, plugin or
-custom function mechanism exists. For example:
+Delimiters use double quotes with only `\"` and `\\` escapes. Empty delimiters
+and all Unicode category `Cc` characters (C0, DEL and C1 controls) are rejected
+consistently by `split` and `expand_ranges`. Other Unicode categories are not
+rejected by that rule; no delimiter normalization occurs. This restriction does
+not apply globally to captured text, regexes or CLI indentation. No regex
+splitting, evaluation, plugin or custom function mechanism exists. For example:
 
 ```text
 switchport trunk allowed vlan {{ vlans | split(",") | expand_ranges("-") | map_int }}
@@ -231,6 +234,14 @@ fails with `MALFORMED_LINE`. This closed grammar applies with one header too;
 adding another header does not change validation policy. A transformation error
 does not retry another header. Unrelated structures follow subtree isolation.
 Root-header filtering and optional child-section selection remain distinct.
+
+Entirely literal child-record headers follow the same closed grammar: for
+`ready state`, `ready state extra` and trailing undeclared spaces/tabs are
+malformed. `ready other`, `ready stateful` and `readyX state extra` remain
+foreign structures. Literal whitespace runs retain their normal space/tab
+matching, without trimming. A uniquely accepted longer declared alternative
+still wins over a shorter header's diagnostic. Root headers, child sections
+and skipped subtrees are unchanged; there is no first-word targeting.
 
 Trivially identical structural matchers are rejected at compilation, even when
 capture names, validators or transformations differ. This is deliberately not a
@@ -322,9 +333,116 @@ musl, free-threaded, macOS, Windows, ARM or vendor-wide qualification is implied
 Distributing a separately repaired RE2 wheel would require explicit approval
 and native-runtime licensing/notice review; it is not this installation policy.
 
+## Offline qualification and measurements (40D)
+
+The [benchmark script](../../tools/benchmark_native.py) uses the standard
+library and the installed Native engine. Run it outside ordinary CI on Linux,
+with Python 3.12 as the reference measurement interpreter:
+
+```bash
+uv run --no-sync python tools/benchmark_native.py \
+  --environment-note "Shared Linux host; concurrent load is not controlled" \
+  > /path/outside/checkout/native-benchmark.json
+```
+
+The caller supplies an existing writable output directory. Failed workers,
+wrong results and changed local sources abort the campaign; do not treat an
+incomplete output file as evidence. There is a 600-second worker safety timeout,
+not a parser performance requirement. No network device or host-wide settings
+are involved.
+
+The default campaign uses five warmups, thirty timing samples, five independent
+cold-compilation workers and three independent workers per memory method/case.
+Workers run sequentially with `PYTHONHASHSEED=0`, normal GC and untouched RE2
+caches. Each timed observation contains one operation. Use repeated `--case`
+selectors for a smaller investigation; sampling overrides are recorded.
+
+### Workloads and verification
+
+The generated corpus is vendor-independent and deterministic:
+
+- Flat parsing: 100, 1,000 and 10,000 records.
+- Hierarchical parsing: the same total selected-block counts, each split into
+  10% parents and 90% children. Three child alternatives share a required body;
+  parent fields, literal headers and integer conversion are exercised.
+- Transformations: split-only, split/expand, split/map and split/expand/map.
+  The full range pipeline produces 4,999 integers and consumes 9,999 intermediate
+  items. Split/map consumes exactly 10,000 items.
+- Rejections: 10,001 required intermediate items, 10,001 attempted selected
+  blocks, late malformed capture structure and late ambiguous child selection.
+
+Default limits are never increased. Counts for rejected workloads describe
+required/attempted totals, not partial returned data. Expected structures are
+generated independently of Native; comparisons serialize types explicitly and
+preserve array order. Error codes and numeric lines are checked too.
+
+### Distinct measurement scopes
+
+| Campaign | Scope |
+| --- | --- |
+| Cold compilation | First Native compilation inside each fresh interpreter, after imports and case generation; Python startup is excluded |
+| Repeated compilation | Same body after warmup, with the binding's ordinary cache effects |
+| Parsing | Precompiled template; includes normal matching, validation, conversion and defensive freezing |
+| Python allocations | Separate fresh worker, tracing starts after case/oracle preparation and parser precompilation; one operation without warmup |
+| Peak RSS | Separate fresh worker; Linux `/proc/self/status` `VmHWM` kB converted to bytes, post-`exec` address-space peak through the operation |
+| Retention observation | Repeated hierarchy-1,000 parses after warmup; release outputs and collect GC before recorded checkpoints |
+
+Elapsed and process CPU durations use `perf_counter_ns` and `process_time_ns`.
+Case generation, imports, external serialization, result verification and
+returned-output cleanup are outside operation timing. Raw samples and
+median/IQR/population-standard-deviation/minimum/maximum summaries retain their
+units in metric names.
+
+Python tracing does not measure all native RE2 allocations. Allocation
+observations include the returned result while alive; retention checkpoints
+instead follow its release. Tracing and checkpoint bookkeeping have overhead.
+Retention peaks also include verification performed between checkpoints.
+RSS includes the interpreter, libraries, case/oracle preparation and compilation,
+not just Native. Linux `ru_maxrss` is also recorded as `rusage_maxrss_bytes`:
+it can retain the launcher's pre-`exec` high-water even in a fresh interpreter.
+Keep that raw counter distinct from `rss_peak_bytes` (`VmHWM`); neither is
+Native-only memory. Do not subtract independent peaks and call the difference
+parser memory. RSS high-water marks and allocator/cache plateaus are not by
+themselves proof of a leak.
+
+The JSON report records commands, UTC timestamps, Python/dependency versions,
+CPU/OS/libc, exposed resource constraints, initial/final load, dataset hashes,
+sizes, patterns, captures and budgets. Missing cgroup files are explicitly
+reported as not exposed. Uncommitted source identity is the baseline/head SHA
+**plus the complete local-patch SHA-256, including untracked files**; it is not
+a new commit SHA. Keep reports outside the checkout so they do not change that
+patch. Review artifacts should retain the raw report and matching patch.
+
+By default the main baseline is inferred with `git merge-base HEAD origin/main`,
+which requires that reference and sufficient history. For a shallow or detached
+checkout, pass `--base-main-sha FULL_APPROVED_MAIN_SHA` explicitly. The supplied
+full SHA must resolve to a local commit; acquire that approved baseline before
+running if it is absent. This identifies the caller-approved main baseline,
+without claiming that shallow history proves ancestry. The script never
+substitutes `HEAD` for a missing baseline or fetches automatically; unresolved
+provenance fails explicitly. CLI smoke tests use isolated synthetic shallow
+repositories and do not depend on the CI checkout's remote refs.
+
+### Qualification boundaries
+
+Use `PASS` only for demonstrated behavior or a completed valid measurement
+protocol, `FAIL` for a reproduced contract violation, `NOT_VERIFIED` for
+insufficient evidence, and `DEFERRED` for explicitly excluded work.
+The review scorecard must identify evidence for the eight approved golden
+scenarios, literal-header diagnostics, Cc delimiters, contexts/failure recovery,
+combined limits, interprocess determinism, immutability, measurements,
+Python 3.11/3.12/3.15 compatibility and installed wheel/sdist checks.
+
+The first campaign establishes descriptive observations, not an absolute
+latency, throughput or memory gate. No production SLO or performance superiority
+is established. A completed measurement protocol can pass while production
+performance suitability remains `NOT_VERIFIED`. Real devices, official Features
+and future integrations remain separate qualifications.
+
 ## Deferred
 
-40D owns measured scorecards and performance benchmarks. Arbitrary route
-attribute permutations, global-route coverage, richer nesting and generalized
-capture partitioning are not delivered. Profile dispatch, JMESPath, schemas,
-Registry activation and collection remain outside Native 40C.
+Arbitrary route attribute permutations, global-route coverage, richer nesting
+and generalized capture partitioning are not delivered. Profile dispatch,
+JMESPath, schemas, Registry activation and collection remain outside Native.
+No hard CPU deadline, process-RSS cap, free-threaded or cross-platform
+performance guarantee follows from this offline qualification.

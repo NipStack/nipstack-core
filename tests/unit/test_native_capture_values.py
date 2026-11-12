@@ -280,3 +280,29 @@ def test_optional_absent_transformation_is_not_empty_conversion():
     with pytest.raises(NativeError) as caught:
         parse_native(template, "Root\n  value ")
     assert caught.value.code == "MALFORMED_LINE"
+
+
+@pytest.mark.parametrize("delimiter", ["\x00", "\x1f", "\x7f", "\x80", "\x85", "\x9f"])
+@pytest.mark.parametrize("operation", ["split", "expand_ranges"])
+def test_transformation_delimiters_reject_unicode_cc(delimiter, operation, capfd):
+    modifier = f'{operation}("{delimiter}")'
+    if operation == "expand_ranges":
+        modifier = 'split(",") | ' + modifier
+    with pytest.raises(NativeError) as caught:
+        compile_native(f"@section\nRoot\n  value {{{{ value | {modifier} }}}}\n@end".encode())
+    assert caught.value.code == "INVALID_TEMPLATE"
+    assert caught.value.__context__ is None
+    assert delimiter not in str(caught.value)
+    assert capfd.readouterr().err == ""
+
+
+@pytest.mark.parametrize("delimiter", [" ", "\u00a0", "\u200b", "\ue000", "\\", '"'])
+@pytest.mark.parametrize("operation", ["split", "expand_ranges"])
+def test_non_cc_delimiters_and_existing_escapes_remain_supported(delimiter, operation):
+    escaped = delimiter.replace("\\", "\\\\").replace('"', '\\"')
+    if operation == "split":
+        assert parse(f'phrase | split("{escaped}")', "a" + delimiter + "b") == ("a", "b")
+    else:
+        assert parse(
+            f'phrase | split(",") | expand_ranges("{escaped}")', "1" + delimiter + "2"
+        ) == ("1", "2")

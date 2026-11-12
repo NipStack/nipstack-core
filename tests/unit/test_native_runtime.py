@@ -1,7 +1,11 @@
 import builtins
 import json
+import os
 import re
 import socket
+import subprocess
+import sys
+import textwrap
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -372,3 +376,73 @@ def test_exact_output_budget_includes_json_escaping_and_optional_empty():
     with pytest.raises(NativeError) as caught:
         parse_native(prepare(body, max_output_bytes=size - 1), "Root\n  value " + value)
     assert caught.value.code == "RESOURCE_LIMIT"
+
+
+def test_results_and_errors_are_deterministic_between_fresh_hash_seeded_processes(tmp_path):
+    source = (
+        "@record\nparent {{ id }}\n@record items\n  ready state\n"
+        '  item {{ numbers | phrase | split(",") | expand_ranges("-") | map_int }}\n'
+        "  item literal {{ label }}\n@end\n@end"
+    )
+    inputs = [
+        "parent A\n  item 1-2,2\n  ready state\nparent A\n  item 1-2,2",
+        "parent A\n  ready state extra",
+        "parent A\n  item literal X",
+        "parent A\n  item 3-1",
+        "parent A\n  item 0-10000",
+    ]
+    program = textwrap.dedent("""
+        import json
+        import sys
+        from collections.abc import Mapping
+        from nipstack_core.parsers.native.compiler import compile_native
+        from nipstack_core.parsers.native.model import NativeError
+        from nipstack_core.parsers.native.runtime import parse_native
+
+        def plain(value):
+            if isinstance(value, Mapping):
+                return {key: plain(child) for key, child in value.items()}
+            if isinstance(value, tuple):
+                return [plain(child) for child in value]
+            return value
+
+        source, inputs = json.load(sys.stdin)
+        compiled = compile_native(source.encode())
+        results = []
+        for text in inputs:
+            try:
+                result = parse_native(compiled, text)
+            except NativeError as error:
+                results.append({"error": error.code, "line": error.line})
+            else:
+                results.append({"ok": plain(result)})
+        print(json.dumps(results, sort_keys=True))
+    """)
+    expected = [
+        {
+            "ok": [
+                {"id": "A", "items": [{"numbers": [1, 2, 2]}, {}]},
+                {"id": "A", "items": [{"numbers": [1, 2, 2]}]},
+            ]
+        },
+        {"error": "MALFORMED_LINE", "line": 2},
+        {"error": "AMBIGUOUS_MATCH", "line": 2},
+        {"error": "MALFORMED_LINE", "line": None},
+        {"error": "RESOURCE_LIMIT", "line": None},
+    ]
+    outputs = []
+    for seed in ("0", "1", "314159"):
+        completed = subprocess.run(
+            [sys.executable, "-P", "-c", program],
+            input=json.dumps([source, inputs]),
+            text=True,
+            capture_output=True,
+            cwd=tmp_path,
+            env=os.environ | {"PYTHONHASHSEED": seed},
+            check=True,
+            timeout=30,
+        )
+        assert completed.stderr == ""
+        assert json.loads(completed.stdout) == expected
+        outputs.append(completed.stdout)
+    assert outputs[0] == outputs[1] == outputs[2]
