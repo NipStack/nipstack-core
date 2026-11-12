@@ -205,3 +205,68 @@ def test_alternative_compilation_budgets_are_global(limit):
     with pytest.raises(NativeError) as caught:
         template(headers, **{limit: 2})
     assert caught.value.code == "RESOURCE_LIMIT"
+
+
+@pytest.mark.parametrize(
+    "line", ["ready state extra", "ready\tstate\textra", "ready state ", "ready state\t"]
+)
+def test_literal_child_record_rejects_undeclared_suffix(line, capfd):
+    with pytest.raises(NativeError) as caught:
+        parse_native(template(("ready state",)), "vrf context A\n  " + line)
+    assert caught.value.code == "MALFORMED_LINE"
+    assert caught.value.line == 2
+    assert line not in str(caught.value)
+    assert caught.value.__context__ is None
+    assert capfd.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    "line", ["ready other", "ready stateful", "readyX state extra", "ready state.extra", "ready"]
+)
+def test_literal_child_record_does_not_target_lexical_prefixes(line):
+    assert parse_native(template(("ready state",)), "vrf context A\n  " + line) == (
+        {"vrf": "A", "routes": ()},
+    )
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_longer_literal_alternative_wins_over_shorter_diagnostic(reverse):
+    headers = ("ready [state+]", "ready [state+] extra")
+    if reverse:
+        headers = headers[::-1]
+    compiled = template(headers)
+    assert parse_native(compiled, "vrf context A\n  ready\t[state+] extra") == (
+        {"vrf": "A", "routes": ({},)},
+    )
+    with pytest.raises(NativeError) as caught:
+        parse_native(compiled, "vrf context A\n  ready [state+] extra invalid")
+    assert caught.value.code == "MALFORMED_LINE"
+
+
+def test_literal_header_still_participates_in_ambiguity_and_indentation_checks():
+    with pytest.raises(NativeError) as caught:
+        parse_native(
+            template(("ready state", "ready {{ value | phrase }}")), "vrf context A\n  ready state"
+        )
+    assert caught.value.code == "AMBIGUOUS_MATCH"
+    with pytest.raises(NativeError) as caught:
+        parse_native(template(("ready state",)), "vrf context A\n   ready state extra")
+    assert caught.value.code == "INVALID_INDENTATION"
+
+
+def test_literal_diagnostic_does_not_inspect_skipped_or_unselected_subtrees():
+    compiled = compile_native(
+        b'@record\nroot {{ id | regex="selected" }}\n@record items\n  ready state\n@end\n@end'
+    )
+    assert parse_native(
+        compiled,
+        "root excluded\n  ready state extra\nroot selected\n"
+        "  foreign\n    ready state extra\n  ready state",
+    ) == ({"id": "selected", "items": ({},)},)
+
+
+def test_literal_suffix_correction_does_not_change_root_or_child_section_selection():
+    assert parse_native(compile_native(b"@record\nRoot\n@end"), "Root extra") == ()
+    compiled = compile_native(b"@record\nRoot\n@section details\n  ready state\n@end\n@end")
+    assert parse_native(compiled, "Root\n  ready state extra") == ({},)
+    assert parse_native(compiled, "Root\n  ready state") == ({"details": {}},)

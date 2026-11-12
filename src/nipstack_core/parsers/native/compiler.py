@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from typing import Literal
+from unicodedata import category
 
 from ._regex import Regex, escape_literal
 from .model import (
@@ -80,7 +81,7 @@ def _delimiter(text: str) -> str:
             escaped = False
         elif character == "\\":
             escaped = True
-        elif character == '"' or ord(character) < 32:
+        elif character == '"' or category(character) == "Cc":
             raise NativeError("INVALID_TEMPLATE")
         else:
             characters.append(character)
@@ -193,7 +194,7 @@ def _parts(text: str, limits: NativeLimits) -> tuple[list[str], list[Capture]]:
     return literals, captures
 
 
-def _pattern(text: str, limits: NativeLimits) -> LinePattern:
+def _pattern(text: str, limits: NativeLimits, *, child_record_header: bool = False) -> LinePattern:
     literals, captures = _parts(text, limits)
     middle = [
         index
@@ -245,7 +246,7 @@ def _pattern(text: str, limits: NativeLimits) -> LinePattern:
         structural.append("(?:" + segment + ")?" if capture.optional else segment)
     structural.append(_literal(literals[-1]))
     diagnostic.append(_literal(literals[-1]))
-    if captures and literals[-1]:
+    if literals[-1] and (captures or child_record_header):
         diagnostic.append(r"(?:[ \t]+[^\r\n]*)?")
     return LinePattern(
         tuple(captures),
@@ -385,7 +386,11 @@ def compile_native(
             raise NativeError("INVALID_TEMPLATE")
         if pattern_count >= limits.max_patterns:
             raise NativeError("RESOURCE_LIMIT")
-        pattern = _pattern(line[len(prefix) :], limits)
+        pattern = _pattern(
+            line[len(prefix) :],
+            limits,
+            child_record_header=header and current.kind == "record" and current.name is not None,
+        )
         if header and any(capture.optional or capture.required for capture in pattern.captures):
             raise NativeError("INVALID_TEMPLATE")
         if not header and not pattern.captures:

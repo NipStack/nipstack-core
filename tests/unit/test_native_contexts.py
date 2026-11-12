@@ -236,3 +236,65 @@ def test_transformed_element_budget_is_shared_by_descendants():
             "parent A\n  item 1,2\nparent B\n  item 3,4",
         )
     assert caught.value.code == "RESOURCE_LIMIT"
+
+
+def test_combined_nested_budgets_include_escaping_intermediates_and_ignored_values():
+    source = (
+        "@record\nparent {{ id }}\n@record items\n"
+        '  item {{ numbers | split(",") | expand_ranges("-") | map_int }}\n'
+        '    skip {{ ignore | split(",") }}\n@end\n@end'
+    )
+    text = 'parent A"\\\u03a9\n  item 1-2\n    skip x,y\nparent B\n  item 3-3\n    skip z'
+    expected = (
+        {"id": 'A"\\\u03a9', "items": ({"numbers": (1, 2)},)},
+        {"id": "B", "items": ({"numbers": (3,)},)},
+    )
+    limits = {
+        "max_input_bytes": len(text.encode()),
+        "max_output_bytes": len(
+            json.dumps(expected, ensure_ascii=False, separators=(",", ":")).encode()
+        ),
+        "max_records": 4,
+        "max_transformed_items": 11,
+    }
+    compiled = compile_text(source, **limits)
+    first = parse_native(compiled, text)
+    assert first == expected
+    with pytest.raises(TypeError):
+        first[0]["items"][0]["numbers"] = ()
+    for name in limits:
+        with pytest.raises(NativeError) as caught:
+            parse_native(compile_text(source, **(limits | {name: limits[name] - 1})), text)
+        assert caught.value.code == "RESOURCE_LIMIT"
+        again = parse_native(compiled, text)
+        assert again == expected
+        assert again is not first
+        assert again[0] is not first[0]
+
+
+@pytest.mark.parametrize(
+    ("invalid", "code"),
+    [
+        ("item 2-1", "MALFORMED_LINE"),
+        ("item literal X", "AMBIGUOUS_MATCH"),
+        ("item 0-10000", "RESOURCE_LIMIT"),
+    ],
+)
+def test_failed_hierarchical_invocation_does_not_leak_contexts_or_budgets(invalid, code):
+    source = (
+        "@record\nparent {{ id }}\n@record items\n"
+        '  item {{ numbers | phrase | split(",") | expand_ranges("-") | map_int }}\n'
+        "  item literal {{ label }}\n@end\n@end"
+    )
+    compiled = compile_text(source, max_records=4, max_transformed_items=10)
+    valid = "parent A\n  item 1-2\nparent A\n  item 1-2"
+    expected = (
+        {"id": "A", "items": ({"numbers": (1, 2)},)},
+        {"id": "A", "items": ({"numbers": (1, 2)},)},
+    )
+    for _ in range(2):
+        with pytest.raises(NativeError) as caught:
+            parse_native(compiled, "parent A\n  item 1-2\nparent B\n  " + invalid)
+        assert caught.value.code == code
+        assert caught.value.__context__ is None
+        assert parse_native(compiled, valid) == expected
